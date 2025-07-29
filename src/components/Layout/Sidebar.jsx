@@ -35,7 +35,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   const [deviceOptions, setDeviceOptions] = useState([]);
   const [allDevices, setAllDevices] = useState([]);
   const user = JSON.parse(localStorage.getItem('user'));
-
+  
   // Fetch projects for dropdown (admin sees all, regular users see only assigned)
   useEffect(() => {
     if (!showUploadModal) return;
@@ -115,10 +115,18 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
       formData.append('description', description);
       formData.append('esp_id', selectedDevice.value);
       formData.append('file', file);
-      await fetch(`${BACKEND_BASE_URL}/firmware/upload`, {
+      
+      const response = await fetch(`${BACKEND_BASE_URL}/firmware/upload`, {
         method: 'POST',
         body: formData
       });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to upload firmware');
+      }
+      
+      // Success - reset form and close modal
       setVersion('');
       setDescription('');
       setFile(null);
@@ -126,15 +134,17 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
       setSelectedDevice(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       setShowUploadModal(false);
+      
+      // Show success message
+      alert('Firmware uploaded successfully!');
     } catch (err) {
-      alert('Failed to upload firmware');
+      alert(`Upload failed: ${err.message}`);
     }
   };
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-    { name: 'Device Management', href: '/devices', icon: Smartphone },
-    // User Management and Firmware Management will be conditionally rendered below
+    // Device Management will be conditionally rendered below for admin only
     { name: 'OTA Updates', href: '/ota-updates', icon: Download },
   ];
 
@@ -183,32 +193,32 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
                     <LayoutDashboard className="mr-3 h-5 w-5" />
                     Dashboard
                       </Link>
-                  {/* Project Management (admin only) */}
-                  {user && user.role === 'admin' && (
-                    <Link
-                      to="/projects"
-                      className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                        isActive('/projects')
-                          ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                      }`}
-                    >
-                      <HardDrive className="mr-3 h-5 w-5" />
-                      Project Management
-                    </Link>
-                  )}
-                  {/* Device Management */}
+                  {/* My Projects (for all users) */}
                   <Link
-                    to="/devices"
+                    to="/projects"
                     className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                      isActive('/devices')
+                      isActive('/projects')
                         ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
                         : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                     }`}
                   >
-                    <Smartphone className="mr-3 h-5 w-5" />
-                    Device Management
+                    <HardDrive className="mr-3 h-5 w-5" />
+                    {user && user.role === 'admin' ? 'Project Management' : 'My Projects'}
                   </Link>
+                  {/* Device Management */}
+                  {user && user.role === 'admin' && (
+                    <Link
+                      to="/devices"
+                      className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                        isActive('/devices')
+                          ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      <Smartphone className="mr-3 h-5 w-5" />
+                      Device Management
+                    </Link>
+                  )}
                   {/* OTA Updates */}
                   <Link
                     to="/ota-updates"
@@ -251,37 +261,39 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
                   )}
                 </div>
 
-                {/* Quick Actions */}
-                <div className="space-y-1 pt-4">
-                  <h3 className="px-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Quick Actions
-                  </h3>
-                  {quickActions.map((item) => {
-                    const Icon = item.icon;
-                    if (item.onClick) {
+                {/* Quick Actions - Admin Only */}
+                {user && user.role === 'admin' && (
+                  <div className="space-y-1 pt-4">
+                    <h3 className="px-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Quick Actions
+                    </h3>
+                    {quickActions.map((item) => {
+                      const Icon = item.icon;
+                      if (item.onClick) {
+                        return (
+                          <button
+                            key={item.name}
+                            onClick={item.onClick}
+                            className={`group flex items-center w-full px-3 py-2 text-sm font-medium rounded-md transition-colors text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`}
+                          >
+                            <Icon className="mr-3 h-5 w-5" />
+                            {item.name}
+                          </button>
+                        );
+                      }
                       return (
-                        <button
+                        <Link
                           key={item.name}
-                          onClick={item.onClick}
-                          className={`group flex items-center w-full px-3 py-2 text-sm font-medium rounded-md transition-colors text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`}
+                          to={item.href}
+                          className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`}
                         >
                           <Icon className="mr-3 h-5 w-5" />
                           {item.name}
-                        </button>
+                        </Link>
                       );
-                    }
-                    return (
-                      <Link
-                        key={item.name}
-                        to={item.href}
-                        className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`}
-                      >
-                        <Icon className="mr-3 h-5 w-5" />
-                        {item.name}
-                      </Link>
-                    );
-                  })}
-                </div>
+                    })}
+                  </div>
+                )}
               </nav>
             </div>
 
@@ -350,6 +362,21 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
                     </Link>
                   );
                 })}
+                {/* Device Management (admin only) */}
+                {user && user.role === 'admin' && (
+                  <Link
+                    to="/devices"
+                    onClick={() => setIsOpen(false)}
+                    className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                      isActive('/devices')
+                        ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    <Smartphone className="mr-3 h-5 w-5" />
+                    Device Management
+                  </Link>
+                )}
                 {/* Conditionally render User Management and Firmware Management for admin only */}
                 {user && user.role === 'admin' && (
                   <>
@@ -379,55 +406,55 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
                     </Link>
                   </>
                 )}
-                {/* Project Management link for admin only */}
-                {user && user.role === 'admin' && (
-                  <Link
-                    to="/projects"
-                    onClick={() => setIsOpen(false)}
-                    className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                      isActive('/projects')
-                        ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                    }`}
-                  >
-                    <HardDrive className="mr-3 h-5 w-5" />
-                    Project Management
-                  </Link>
-                )}
+                {/* My Projects (for all users) */}
+                <Link
+                  to="/projects"
+                  onClick={() => setIsOpen(false)}
+                  className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                    isActive('/projects')
+                      ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  <HardDrive className="mr-3 h-5 w-5" />
+                  {user && user.role === 'admin' ? 'Project Management' : 'My Projects'}
+                </Link>
               </div>
 
-              {/* Quick Actions */}
-              <div className="space-y-1 pt-4">
-                <h3 className="px-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Quick Actions
-                </h3>
-                {quickActions.map((item) => {
-                  const Icon = item.icon;
-                  if (item.onClick) {
+              {/* Quick Actions - Admin Only */}
+              {user && user.role === 'admin' && (
+                <div className="space-y-1 pt-4">
+                  <h3 className="px-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Quick Actions
+                  </h3>
+                  {quickActions.map((item) => {
+                    const Icon = item.icon;
+                    if (item.onClick) {
+                      return (
+                        <button
+                          key={item.name}
+                          onClick={item.onClick}
+                          className={`group flex items-center w-full px-3 py-2 text-sm font-medium rounded-md transition-colors text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`}
+                        >
+                          <Icon className="mr-3 h-5 w-5" />
+                          {item.name}
+                        </button>
+                      );
+                    }
                     return (
-                      <button
+                      <Link
                         key={item.name}
-                        onClick={item.onClick}
-                        className={`group flex items-center w-full px-3 py-2 text-sm font-medium rounded-md transition-colors text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`}
+                        to={item.href}
+                        onClick={() => setIsOpen(false)}
+                        className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`}
                       >
                         <Icon className="mr-3 h-5 w-5" />
                         {item.name}
-                      </button>
+                      </Link>
                     );
-                  }
-                  return (
-                    <Link
-                      key={item.name}
-                      to={item.href}
-                      onClick={() => setIsOpen(false)}
-                      className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`}
-                    >
-                      <Icon className="mr-3 h-5 w-5" />
-                      {item.name}
-                    </Link>
-                  );
-                })}
-              </div>
+                  })}
+                </div>
+              )}
             </nav>
           </div>
 

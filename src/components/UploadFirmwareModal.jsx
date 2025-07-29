@@ -1,4 +1,4 @@
-import { Upload, X } from 'lucide-react';
+import { Upload, X, AlertCircle } from 'lucide-react';
 import Select from 'react-select';
 import '../pages/react-select-tailwind.css';
 
@@ -23,6 +23,26 @@ const UploadFirmwareModal = ({
   handleUpload
 }) => {
   if (!show) return null;
+
+  // Generate expected filename based on selected project and device
+  const getExpectedFilename = () => {
+    if (!selectedProject || !selectedDevice) return '';
+    const projectName = selectedProject.label.replace(/\s+/g, '_').toLowerCase();
+    const deviceName = selectedDevice.label.split(' (')[0].replace(/\s+/g, '_').toLowerCase();
+    return `${projectName}_${deviceName}`;
+  };
+
+  // Validate filename
+  const validateFilename = (filename) => {
+    if (!selectedProject || !selectedDevice) return false;
+    const expectedFilename = getExpectedFilename();
+    const fileBaseName = filename.replace(/\.[^/.]+$/, ''); // Remove extension
+    return fileBaseName === expectedFilename;
+  };
+
+  const expectedFilename = getExpectedFilename();
+  const isFilenameValid = file ? validateFilename(file.name) : false;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-0 w-full max-w-2xl relative">
@@ -38,15 +58,54 @@ const UploadFirmwareModal = ({
           <div className="flex-1 flex flex-col items-center justify-center mb-6 md:mb-0 md:pr-4">
             <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-3 self-start">Upload Firmware</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 self-start">Drag and drop a file or click to select.</p>
+            
+            {/* Expected filename display */}
+            {selectedProject && selectedDevice && (
+              <div className="w-full mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <p className="text-sm text-blue-800 dark:text-blue-200 font-medium mb-1">
+                  Expected filename format:
+                </p>
+                <p className="text-sm text-blue-600 dark:text-blue-300 font-mono">
+                  {expectedFilename}.bin
+                </p>
+              </div>
+            )}
+
             <div
-              className="w-full h-44 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl flex flex-col items-center justify-center cursor-pointer bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 transition mb-2"
+              className={`w-full h-44 border-2 border-dashed rounded-xl flex flex-col items-center justify-center cursor-pointer transition mb-2 ${
+                file 
+                  ? isFilenameValid 
+                    ? 'border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20' 
+                    : 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20'
+                  : 'border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800'
+              }`}
               onDrop={handleDrop}
               onDragOver={e => e.preventDefault()}
               onClick={() => fileInputRef.current && fileInputRef.current.click()}
             >
-              <Upload className="h-12 w-12 text-gray-400 mb-2" />
+              <Upload className={`h-12 w-12 mb-2 ${
+                file 
+                  ? isFilenameValid 
+                    ? 'text-green-500' 
+                    : 'text-red-500'
+                  : 'text-gray-400'
+              }`} />
               {file ? (
-                <span className="text-blue-700 dark:text-blue-300 font-medium text-base">{file.name}</span>
+                <div className="text-center">
+                  <span className={`font-medium text-base ${
+                    isFilenameValid 
+                      ? 'text-green-700 dark:text-green-300' 
+                      : 'text-red-700 dark:text-red-300'
+                  }`}>
+                    {file.name}
+                  </span>
+                  {!isFilenameValid && (
+                    <div className="flex items-center justify-center mt-2 text-red-600 dark:text-red-400">
+                      <AlertCircle className="h-4 w-4 mr-1" />
+                      <span className="text-xs">Invalid filename format</span>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <>
                   <span className="text-gray-700 dark:text-gray-300 font-medium text-base">Click to upload or drag and drop</span>
@@ -135,7 +194,7 @@ const UploadFirmwareModal = ({
             <button
               type="submit"
               className="w-full h-12 mt-2 px-6 py-2 rounded-lg bg-blue-600 text-white text-base font-semibold shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 transition disabled:opacity-50 flex items-center justify-center gap-2"
-              disabled={!selectedDevice || !version || !file}
+              disabled={!selectedDevice || !version || !file || !isFilenameValid}
             >
               <Upload className="h-5 w-5 mr-1 inline" /> Upload Firmware
             </button>

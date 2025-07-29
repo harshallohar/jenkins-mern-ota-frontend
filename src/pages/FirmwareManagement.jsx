@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Upload, Plus, Filter as FilterIcon, Search as SearchIcon, Trash2 } from 'lucide-react';
+import { Upload, Plus, Filter as FilterIcon, Search as SearchIcon, Trash2, Download } from 'lucide-react';
 import UploadFirmwareModal from '../components/UploadFirmwareModal';
 import { BACKEND_BASE_URL } from '../utils/api';
 import Select from 'react-select';
+import * as XLSX from 'xlsx';
 
 const PAGE_SIZE = 5;
 
@@ -22,6 +23,7 @@ const FirmwareManagement = () => {
   const [selectedRows, setSelectedRows] = useState([]);
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
+  const [selectedDeviceFilter, setSelectedDeviceFilter] = useState(null);
   const user = JSON.parse(localStorage.getItem('user'));
 
   const FIRMWARE_API = `${BACKEND_BASE_URL}/firmware`;
@@ -98,11 +100,18 @@ const FirmwareManagement = () => {
   const filteredFirmwares = firmwares.filter(fw => {
     const device = devices.find(d => d.deviceId === fw.esp_id);
     const deviceName = device ? device.name : '';
-    return (
+    
+    // Filter by search term
+    const matchesSearch = (
       fw.version.toLowerCase().includes(search.toLowerCase()) ||
       (fw.uploadedDate && new Date(fw.uploadedDate).toLocaleDateString().includes(search)) ||
       deviceName.toLowerCase().includes(search.toLowerCase())
     );
+    
+    // Filter by selected device
+    const matchesDevice = selectedDeviceFilter ? fw.esp_id === selectedDeviceFilter.value : true;
+    
+    return matchesSearch && matchesDevice;
   });
 
   // Pagination
@@ -120,10 +129,18 @@ const FirmwareManagement = () => {
       formData.append('description', description);
       formData.append('esp_id', selectedDevice?.value);
       formData.append('file', file);
-      await fetch(`${FIRMWARE_API}/upload`, {
+      
+      const response = await fetch(`${FIRMWARE_API}/upload`, {
         method: 'POST',
         body: formData
       });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to upload firmware');
+      }
+      
+      // Success - reset form and close modal
       setShowUploadModal(false);
       setVersion('');
       setDescription('');
@@ -132,7 +149,7 @@ const FirmwareManagement = () => {
       if (fileInputRef.current) fileInputRef.current.value = '';
       fetchFirmwares();
     } catch (err) {
-      setError('Failed to upload firmware');
+      setError(`Upload failed: ${err.message}`);
       setLoading(false);
     }
   };
@@ -217,6 +234,106 @@ const FirmwareManagement = () => {
     }
   };
 
+  // Export Firmware data
+  const exportFirmwareData = () => {
+    const selectedProjectData = projects.find(p => p._id === selectedProject?.value);
+    const selectedDeviceData = selectedDeviceFilter ? devices.find(d => d.deviceId === selectedDeviceFilter.value) : null;
+    
+    // Get ALL firmwares for the selected project and device (ignoring search filter and pagination)
+    let exportFirmwares = firmwares;
+    
+    // Filter by project if selected
+    if (selectedProject) {
+      const projectDevices = devices.filter(d => d.project === selectedProject.value);
+      const projectDeviceIds = projectDevices.map(d => d.deviceId);
+      exportFirmwares = exportFirmwares.filter(fw => projectDeviceIds.includes(fw.esp_id));
+    }
+    
+    // Filter by device if selected
+    if (selectedDeviceFilter) {
+      exportFirmwares = exportFirmwares.filter(fw => fw.esp_id === selectedDeviceFilter.value);
+    }
+    
+    // Get devices for the export
+    let exportDevices = devices;
+    if (selectedProject) {
+      exportDevices = devices.filter(d => d.project === selectedProject.value);
+    }
+    if (selectedDeviceFilter) {
+      exportDevices = exportDevices.filter(d => d.deviceId === selectedDeviceFilter.value);
+    }
+    
+    const data = [
+      {
+        sheet: 'Firmware Summary',
+        data: [
+          { 'Export Date': new Date().toLocaleDateString() },
+          { 'Export Time': new Date().toLocaleTimeString() },
+          { 'Selected Project': selectedProjectData?.projectName || 'All Projects' },
+          { 'Selected Device': selectedDeviceData?.name || 'All Devices' },
+          { 'Total Firmwares Exported': exportFirmwares.length },
+          { 'Total Devices': exportDevices.length },
+          { 'Current Search Term': search || 'None' },
+          { 'Current Filtered Results': filteredFirmwares.length },
+          { 'Note': 'Export includes ALL firmwares for selected project/device, not just filtered results' }
+        ]
+      },
+             {
+         sheet: 'All Firmwares with URLs',
+         data: exportFirmwares.map(fw => {
+           const device = devices.find(d => d.deviceId === fw.esp_id);
+           const project = device ? projects.find(p => p._id === device.project) : null;
+           const downloadUrl = `${BACKEND_BASE_URL}/firmware/download/${fw._id}`;
+           
+           return {
+             'Firmware ID': fw._id,
+             'Version': fw.version,
+             'Description': fw.description || 'N/A',
+             'Device ID': fw.esp_id,
+             'Device Name': device?.name || 'Unknown',
+             'Project': project?.projectName || 'N/A',
+             'File Name': fw.fileName || fw.originalFileName || 'N/A',
+             'File Size': fw.fileSize || 'N/A',
+             'Upload Date': fw.uploadedDate ? new Date(fw.uploadedDate).toLocaleDateString() : 'N/A',
+             'Upload Time': fw.uploadedDate ? new Date(fw.uploadedDate).toLocaleTimeString() : 'N/A',
+             'Full Upload Date': fw.uploadedDate ? new Date(fw.uploadedDate).toISOString() : 'N/A',
+             'Download URL': downloadUrl,
+             'Status': 'Active'
+           };
+         })
+       },
+      {
+        sheet: 'Device Information',
+        data: exportDevices.map(device => {
+          const project = projects.find(p => p._id === device.project);
+          const deviceFirmwares = exportFirmwares.filter(fw => fw.esp_id === device.deviceId);
+          
+          return {
+            'Device Name': device.name,
+            'Device ID': device.deviceId,
+            'Project': project?.projectName || 'N/A',
+            'Status': device.status || 'Active',
+            'Date Created': device.dateCreated ? new Date(device.dateCreated).toLocaleDateString() : 'N/A',
+            'Total Firmwares': deviceFirmwares.length,
+            'Latest Firmware': deviceFirmwares.length > 0 ? deviceFirmwares[deviceFirmwares.length - 1].version : 'N/A',
+                         'Latest Upload Date': deviceFirmwares.length > 0 && deviceFirmwares[deviceFirmwares.length - 1].uploadedDate 
+               ? new Date(deviceFirmwares[deviceFirmwares.length - 1].uploadedDate).toLocaleDateString() 
+               : 'N/A'
+          };
+        })
+      }
+    ];
+
+    const wb = XLSX.utils.book_new();
+    data.forEach(({ sheet, data }) => {
+      const ws = XLSX.utils.json_to_sheet(data);
+      XLSX.utils.book_append_sheet(wb, ws, sheet);
+    });
+    
+    const fileName = `Firmware_Management_${selectedProjectData?.projectName || 'All'}_${selectedDeviceData?.name || 'AllDevices'}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
+
   return (
     <div className="min-h-screen py-8 px-2 sm:px-4 md:px-8 bg-gray-50 dark:bg-gray-900">
       <div className="max-w-6xl mx-auto">
@@ -241,6 +358,12 @@ const FirmwareManagement = () => {
                 <FilterIcon className="h-4 w-4" /> Filter
               </button>
               <button
+                onClick={exportFirmwareData}
+                className="flex items-center gap-2 px-4 py-2 rounded-md bg-green-600 text-white font-semibold shadow hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-400 transition text-sm"
+              >
+                <Download className="h-4 w-4" /> Export Data
+              </button>
+              <button
                 className="flex items-center gap-2 px-4 py-2 rounded-md bg-blue-600 text-white font-semibold shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 transition text-sm"
                 onClick={() => setShowUploadModal(true)}
               >
@@ -248,18 +371,62 @@ const FirmwareManagement = () => {
               </button>
             </div>
           </div>
-          {/* Project selection for non-admin */}
-          {user && user.role !== 'admin' && (
-            <div className="flex flex-col sm:flex-row gap-4 mb-6 px-8">
+          {/* Project and Device Selection */}
+          <div className="flex flex-col sm:flex-row gap-4 mb-6 px-8">
+            {/* Project Selection */}
+            <Select
+              className="min-w-[220px]"
+              classNamePrefix="react-select"
+              options={projects.map(p => ({ value: p._id, label: p.projectName }))}
+              isClearable
+              placeholder="Select project..."
+              value={selectedProject}
+              onChange={option => { 
+                setSelectedProject(option); 
+                setSelectedDeviceFilter(null); 
+                setPage(1); 
+              }}
+            />
+            
+            {/* Device Selection - only show if project is selected */}
+            {selectedProject && (
               <Select
                 className="min-w-[220px]"
                 classNamePrefix="react-select"
-                options={projects.map(p => ({ value: p._id, label: p.projectName }))}
+                options={filteredDevices.map(d => ({ value: d.deviceId, label: `${d.name} (${d.deviceId})` }))}
                 isClearable
-                placeholder="Select project..."
-                value={selectedProject}
-                onChange={option => { setSelectedProject(option); setSelectedDevice(null); }}
+                placeholder="Select device..."
+                value={selectedDeviceFilter}
+                onChange={option => { 
+                  setSelectedDeviceFilter(option); 
+                  setPage(1); 
+                }}
               />
+            )}
+          </div>
+          
+          {/* Filter Indicator */}
+          {(selectedProject || selectedDeviceFilter) && (
+            <div className="px-8 mb-4">
+              <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
+                  <FilterIcon className="h-4 w-4" />
+                  <span className="font-medium">Filtered by:</span>
+                  {selectedProject && (
+                    <span className="bg-blue-100 dark:bg-blue-900/20 px-2 py-1 rounded text-xs">
+                      Project: {selectedProject.label}
+                    </span>
+                  )}
+                  {selectedDeviceFilter && (
+                    <span className="bg-blue-100 dark:bg-blue-900/20 px-2 py-1 rounded text-xs">
+                      Device: {selectedDeviceFilter.label}
+                    </span>
+                  )}
+                  <span className="text-blue-600 dark:text-blue-400">
+                    ({filteredFirmwares.length} firmwares found)
+                  </span>
+                </div>
+              </div>
             </div>
           )}
           {/* Table/List */}

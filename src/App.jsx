@@ -56,7 +56,7 @@ function App() {
               isAuthenticated ? (
                 <Routes>
                   <Route path="/dashboard" element={<PageWithTitle title="Dashboard"><Dashboard /></PageWithTitle>} />
-                  <Route path="/devices" element={<PageWithTitle title="Device Management"><DeviceManagement /></PageWithTitle>} />
+                  <Route path="/devices" element={user && user.role === 'admin' ? <PageWithTitle title="Device Management"><DeviceManagement /></PageWithTitle> : <Navigate to="/dashboard" />} />
                   {/* Only admin can access User Management */}
                   <Route path="/users" element={user && user.role === 'admin' ? <PageWithTitle title="User Management"><UserManagement /></PageWithTitle> : <Navigate to="/dashboard" />} />
                   {/* Firmware Management (admin only) */}

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { BACKEND_BASE_URL } from '../utils/api';
 import Select from 'react-select';
+import * as XLSX from 'xlsx';
 
 const DEVICES_PER_PAGE = 5;
 const UPDATES_PER_PAGE = 5;
@@ -34,6 +35,7 @@ const OTAUpdates = () => {
   const [error, setError] = useState('');
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
+  const [selectedUpdates, setSelectedUpdates] = useState([]);
 
   // Fetch devices
   useEffect(() => {
@@ -90,6 +92,7 @@ const OTAUpdates = () => {
   if (!Array.isArray(devices)) {
     return <div className="p-8 text-center text-red-500 font-semibold">Error loading devices.</div>;
   }
+  
   // Filter devices by selected project
   const filteredDevices = selectedProject
     ? devices.filter(d => d.project === selectedProject.value)
@@ -97,11 +100,41 @@ const OTAUpdates = () => {
   const pagedDevices = filteredDevices.slice((devicePage - 1) * DEVICES_PER_PAGE, devicePage * DEVICES_PER_PAGE);
   const totalDevicePages = Math.ceil(filteredDevices.length / DEVICES_PER_PAGE);
 
+  // Helper function to normalize status (for backward compatibility)
+  const normalizeStatus = (status) => {
+    if (!status) return 'Failed';
+    const statusLower = status.toLowerCase();
+    if (statusLower.includes('success') || statusLower.includes('programming successfull')) {
+      return 'Success';
+    } else if (statusLower.includes('fail') || statusLower.includes('unsuccessful')) {
+      return 'Failed';
+    } else {
+      return 'In Progress';
+    }
+  };
+
   // Filtered OTA updates for selected device
   const filteredUpdates = useMemo(() => {
     let updates = otaUpdates;
     if (selectedDeviceId) {
-      updates = updates.filter(u => u.deviceId === devices.find(d => d._id === selectedDeviceId)?.deviceId);
+      // Find the selected device to get its deviceId
+      const selectedDevice = devices.find(d => d._id === selectedDeviceId);
+      if (selectedDevice) {
+        // Filter OTA updates by the device's deviceId
+        // Handle both formats: with and without 0x prefix
+        const deviceIdToMatch = selectedDevice.deviceId;
+        const deviceIdWithoutPrefix = deviceIdToMatch.replace(/^0x/i, '');
+        
+        updates = updates.filter(u => {
+          const updateDeviceId = u.deviceId;
+          const updateDeviceIdWithoutPrefix = updateDeviceId.replace(/^0x/i, '');
+          
+          return u.deviceId === deviceIdToMatch || 
+                 updateDeviceIdWithoutPrefix === deviceIdWithoutPrefix ||
+                 u.deviceId === deviceIdWithoutPrefix ||
+                 updateDeviceIdWithoutPrefix === deviceIdToMatch;
+        });
+      }
     }
     return updates;
   }, [otaUpdates, selectedDeviceId, devices]);
@@ -109,8 +142,8 @@ const OTAUpdates = () => {
   const totalUpdatesPages = Math.ceil(filteredUpdates.length / UPDATES_PER_PAGE);
 
   // Summary counts
-  const successCount = filteredUpdates.filter(u => u.normalizedStatus === 'Success').length;
-  const failedCount = filteredUpdates.filter(u => u.normalizedStatus === 'Failed').length;
+  const successCount = filteredUpdates.filter(u => normalizeStatus(u.status) === 'Success').length;
+  const failedCount = filteredUpdates.filter(u => normalizeStatus(u.status) === 'Failed').length;
 
   // --- UI helpers for pill badges ---
   const getDeviceStatusBadge = (status) => {
@@ -190,11 +223,85 @@ const OTAUpdates = () => {
     }
   };
 
+  // Export OTA Updates data
+  const exportOTAUpdatesData = () => {
+    const selectedDevice = filteredDevices.find(d => d._id === selectedDeviceId);
+    const selectedProjectData = projects.find(p => p._id === selectedProject?.value);
+    
+    const data = [
+      {
+        sheet: 'OTA Updates Summary',
+        data: [
+          { 'Export Date': new Date().toLocaleDateString() },
+          { 'Export Time': new Date().toLocaleTimeString() },
+          { 'Selected Project': selectedProjectData?.projectName || 'All Projects' },
+          { 'Selected Device': selectedDevice?.name || 'All Devices' },
+          { 'Total Updates': filteredUpdates.length },
+          { 'Success Count': filteredUpdates.filter(u => normalizeStatus(u.status) === 'Success').length },
+          { 'Failed Count': filteredUpdates.filter(u => normalizeStatus(u.status) === 'Failed').length },
+          { 'In Progress Count': filteredUpdates.filter(u => normalizeStatus(u.status) === 'In Progress').length },
+          { 'Success Rate': `${((filteredUpdates.filter(u => normalizeStatus(u.status) === 'Success').length / filteredUpdates.length) * 100).toFixed(1)}%` }
+        ]
+      },
+      {
+        sheet: 'OTA Updates Details',
+        data: filteredUpdates.map(update => ({
+          'PIC ID': update.pic_id || 'N/A',
+          'Device ID': update.deviceId,
+          'Device Name': devices.find(d => d.deviceId === update.deviceId)?.name || 'Unknown',
+          'Status': update.status,
+          'Normalized Status': normalizeStatus(update.status),
+          'Previous Version': update.previousVersion || 'N/A',
+          'Updated Version': update.updatedVersion || 'N/A',
+          'Update Date': update.date ? new Date(update.date).toLocaleDateString() : 'N/A',
+          'Update Time': update.date ? new Date(update.date).toLocaleTimeString() : 'N/A',
+          'Full Date': update.date ? new Date(update.date).toISOString() : 'N/A',
+          'Project': selectedProjectData?.projectName || 'N/A'
+        }))
+      },
+      {
+        sheet: 'Device Information',
+        data: filteredDevices.map(device => ({
+          'Device Name': device.name,
+          'Device ID': device.deviceId,
+          'Project': selectedProjectData?.projectName || 'N/A',
+          'Status': device.status || 'Active',
+          'Date Created': device.dateCreated ? new Date(device.dateCreated).toLocaleDateString() : 'N/A',
+          'Total Updates': filteredUpdates.filter(u => u.deviceId === device.deviceId).length,
+          'Success Count': filteredUpdates.filter(u => u.deviceId === device.deviceId && normalizeStatus(u.status) === 'Success').length,
+          'Failed Count': filteredUpdates.filter(u => u.deviceId === device.deviceId && normalizeStatus(u.status) === 'Failed').length,
+          'Success Rate': (() => {
+            const deviceUpdates = filteredUpdates.filter(u => u.deviceId === device.deviceId);
+            return deviceUpdates.length > 0 
+              ? `${((deviceUpdates.filter(u => normalizeStatus(u.status) === 'Success').length / deviceUpdates.length) * 100).toFixed(1)}%`
+              : '0%';
+          })()
+        }))
+      }
+    ];
+
+    const wb = XLSX.utils.book_new();
+    data.forEach(({ sheet, data }) => {
+      const ws = XLSX.utils.json_to_sheet(data);
+      XLSX.utils.book_append_sheet(wb, ws, sheet);
+    });
+    
+    const fileName = `OTA_Updates_${selectedProjectData?.projectName || 'All'}_${selectedDevice?.name || 'AllDevices'}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
+
   return (
     <div className="min-h-screen py-8 px-2 sm:px-6 md:px-12 bg-gray-50 dark:bg-gray-900">
       {/* Header */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">OTA Updates</h1>
+        <button
+          onClick={exportOTAUpdatesData}
+          className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+        >
+          <Download className="h-4 w-4 mr-2" />
+          Export Data
+        </button>
       </div>
       {/* Project and Device Selection */}
       <div className="mb-6 flex flex-col sm:flex-row gap-4 items-center">
@@ -242,9 +349,9 @@ const OTAUpdates = () => {
                     <td className="px-4 py-2 text-gray-900 dark:text-white">{update.pic_id}</td>
                     <td className="px-4 py-2 text-gray-900 dark:text-white">{update.deviceId}</td>
                     <td className="px-4 py-2">
-                      {update.normalizedStatus === 'Success' && <span className="inline-block px-2 py-1 rounded-full bg-green-100 text-green-800 text-xs font-semibold">{update.status}</span>}
-                      {update.normalizedStatus === 'Failed' && <span className="inline-block px-2 py-1 rounded-full bg-red-100 text-red-800 text-xs font-semibold">{update.status}</span>}
-                      {update.normalizedStatus === 'In Progress' && <span className="inline-block px-2 py-1 rounded-full bg-yellow-100 text-yellow-800 text-xs font-semibold">{update.status}</span>}
+                      {normalizeStatus(update.status) === 'Success' && <span className="inline-block px-2 py-1 rounded-full bg-green-100 text-green-800 text-xs font-semibold">{update.status}</span>}
+                      {normalizeStatus(update.status) === 'Failed' && <span className="inline-block px-2 py-1 rounded-full bg-red-100 text-red-800 text-xs font-semibold">{update.status}</span>}
+                      {normalizeStatus(update.status) === 'In Progress' && <span className="inline-block px-2 py-1 rounded-full bg-yellow-100 text-yellow-800 text-xs font-semibold">{update.status}</span>}
                     </td>
                     <td className="px-4 py-2 text-gray-500 dark:text-gray-400">{update.previousVersion}</td>
                     <td className="px-4 py-2 text-gray-900 dark:text-white">{update.updatedVersion}</td>

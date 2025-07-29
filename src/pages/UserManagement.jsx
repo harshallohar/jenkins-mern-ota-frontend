@@ -11,10 +11,12 @@ import {
   User,
   Shield,
   Mail,
-  Calendar
+  Calendar,
+  Download
 } from 'lucide-react';
 import { BACKEND_BASE_URL } from '../utils/api';
 import Select from 'react-select';
+import * as XLSX from 'xlsx';
 
 const API = `${BACKEND_BASE_URL}/users`;
 const PROJECTS_API = `${BACKEND_BASE_URL}/projects`;
@@ -128,7 +130,7 @@ const UserManagement = () => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    const user = JSON.parse(localStorage.getItem('user'));
+    const currentUser = JSON.parse(localStorage.getItem('user'));
     try {
       // Only include password if not empty
       const updateData = { ...editingUser };
@@ -143,7 +145,7 @@ const UserManagement = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Edit user failed');
       // Assign projects if admin and projects selected
-      if (user && user.role === 'admin') {
+      if (currentUser && currentUser.role === 'admin') {
         const token = localStorage.getItem('authToken');
         await fetch(`${API}/${editingUser._id}/assign-projects`, {
           method: 'PUT',
@@ -151,6 +153,22 @@ const UserManagement = () => {
           body: JSON.stringify({ projectIds: selectedProjects.map(p => p.value) })
         });
       }
+      
+      // If the current user is editing their own profile, update localStorage
+      if (currentUser && currentUser._id === editingUser._id) {
+        const updatedUserData = {
+          ...currentUser,
+          name: editingUser.name,
+          email: editingUser.email,
+          role: editingUser.role,
+          canAccessFirmware: editingUser.canAccessFirmware,
+          projects: selectedProjects.map(p => p.value)
+        };
+        localStorage.setItem('user', JSON.stringify(updatedUserData));
+        // Force a page reload to update the UI with new permissions
+        window.location.reload();
+      }
+      
       setEditModalOpen(false);
       setEditingUser(null);
       fetchUsers();
@@ -245,6 +263,78 @@ const UserManagement = () => {
     }
   };
 
+  // Export User data
+  const exportUserData = () => {
+    const user = JSON.parse(localStorage.getItem('user'));
+    
+    const data = [
+      {
+        sheet: 'User Management Summary',
+        data: [
+          { 'Export Date': new Date().toLocaleDateString() },
+          { 'Export Time': new Date().toLocaleTimeString() },
+          { 'Exported By': user?.name || 'Unknown' },
+          { 'Total Users': userList.length },
+          { 'Admin Users': userList.filter(u => u.role === 'admin').length },
+          { 'Regular Users': userList.filter(u => u.role === 'user').length },
+          { 'Viewer Users': userList.filter(u => u.role === 'viewer').length },
+          { 'Search Term': searchTerm || 'None' },
+          { 'Role Filter': roleFilter },
+          { 'Filtered Results': filteredUsers.length }
+        ]
+      },
+      {
+        sheet: 'User Details',
+        data: userList.map(user => {
+          const userProjects = projects.filter(p => user.projects && user.projects.includes(p._id));
+          const userDevices = devices.filter(d => userProjects.some(p => p.devices && p.devices.includes(d._id)));
+          
+          return {
+            'User ID': user._id,
+            'Name': user.name,
+            'Email': user.email,
+            'Role': user.role,
+            'Status': user.status || 'Active',
+            'Date Created': user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A',
+            'Last Login': user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'N/A',
+            'Assigned Projects': userProjects.map(p => p.projectName).join(', ') || 'None',
+            'Total Assigned Projects': userProjects.length,
+            'Total Assigned Devices': userDevices.length,
+            'Device Names': userDevices.map(d => d.name).join(', ') || 'None',
+            'Device IDs': userDevices.map(d => d.deviceId).join(', ') || 'None'
+          };
+        })
+      },
+      {
+        sheet: 'Project Assignments',
+        data: projects.map(project => {
+          const assignedUsers = userList.filter(u => u.projects && u.projects.includes(project._id));
+          const projectDevices = devices.filter(d => project.devices && project.devices.includes(d._id));
+          
+          return {
+            'Project Name': project.projectName,
+            'Project Description': project.projectDescription || 'N/A',
+            'Total Assigned Users': assignedUsers.length,
+            'Assigned User Names': assignedUsers.map(u => u.name).join(', ') || 'None',
+            'Assigned User Emails': assignedUsers.map(u => u.email).join(', ') || 'None',
+            'Total Devices': projectDevices.length,
+            'Device Names': projectDevices.map(d => d.name).join(', ') || 'None',
+            'Device IDs': projectDevices.map(d => d.deviceId).join(', ') || 'None'
+          };
+        })
+      }
+    ];
+
+    const wb = XLSX.utils.book_new();
+    data.forEach(({ sheet, data }) => {
+      const ws = XLSX.utils.json_to_sheet(data);
+      XLSX.utils.book_append_sheet(wb, ws, sheet);
+    });
+    
+    const fileName = `User_Management_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -255,7 +345,14 @@ const UserManagement = () => {
             Manage user accounts and permissions
           </p>
         </div>
-        <div className="mt-4 sm:mt-0">
+        <div className="mt-4 sm:mt-0 flex gap-2">
+          <button
+            onClick={exportUserData}
+            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Export Data
+          </button>
           <button
             onClick={() => setAddModalOpen(true)}
             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"

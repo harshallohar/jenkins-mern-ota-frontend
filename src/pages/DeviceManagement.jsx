@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Edit, Trash2 } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Download } from 'lucide-react';
 import { BACKEND_BASE_URL } from '../utils/api';
 import Select from 'react-select';
+import * as XLSX from 'xlsx';
 
 const API_URL = `${BACKEND_BASE_URL}/devices`;
 const PROJECTS_API = `${BACKEND_BASE_URL}/projects`;
@@ -161,6 +162,73 @@ const DeviceManagement = () => {
 
   const user = JSON.parse(localStorage.getItem('user'));
 
+  // Export Device data
+  const exportDeviceData = () => {
+    const data = [
+      {
+        sheet: 'Device Management Summary',
+        data: [
+          { 'Export Date': new Date().toLocaleDateString() },
+          { 'Export Time': new Date().toLocaleTimeString() },
+          { 'Exported By': user?.name || 'Unknown' },
+          { 'Total Devices': devices.length },
+          { 'Assigned Devices': devices.filter(d => d.project).length },
+          { 'Unassigned Devices': devices.filter(d => !d.project).length },
+          { 'Search Term': searchTerm || 'None' },
+          { 'Filtered Results': filteredDevices.length }
+        ]
+      },
+      {
+        sheet: 'Device Details',
+        data: devices.map(device => {
+          const project = projects.find(p => p._id === String(device.project));
+          const assignedUsers = users.filter(user => user.projects && user.projects.includes(device.project));
+          
+          return {
+            'Device ID': device._id,
+            'Device Name': device.name,
+            'Device ID (Hardware)': device.deviceId,
+            'Assigned Project': project?.projectName || 'Unassigned',
+            'Project Description': project?.projectDescription || 'N/A',
+            'Status': device.status || 'Active',
+            'Date Created': device.dateCreated ? new Date(device.dateCreated).toLocaleDateString() : 'N/A',
+            'Date Assigned': device.dateAssigned ? new Date(device.dateAssigned).toLocaleDateString() : 'N/A',
+            'Assigned Users': assignedUsers.map(u => u.name).join(', ') || 'None',
+            'Assigned User Emails': assignedUsers.map(u => u.email).join(', ') || 'None',
+            'Total Assigned Users': assignedUsers.length
+          };
+        })
+      },
+      {
+        sheet: 'Project Device Summary',
+        data: projects.map(project => {
+          const projectDevices = devices.filter(d => d.project === project._id);
+          const assignedUsers = users.filter(user => user.projects && user.projects.includes(project._id));
+          
+          return {
+            'Project Name': project.projectName,
+            'Project Description': project.projectDescription || 'N/A',
+            'Total Devices': projectDevices.length,
+            'Device Names': projectDevices.map(d => d.name).join(', ') || 'None',
+            'Device IDs': projectDevices.map(d => d.deviceId).join(', ') || 'None',
+            'Total Assigned Users': assignedUsers.length,
+            'Assigned User Names': assignedUsers.map(u => u.name).join(', ') || 'None',
+            'Assigned User Emails': assignedUsers.map(u => u.email).join(', ') || 'None'
+          };
+        })
+      }
+    ];
+
+    const wb = XLSX.utils.book_new();
+    data.forEach(({ sheet, data }) => {
+      const ws = XLSX.utils.json_to_sheet(data);
+      XLSX.utils.book_append_sheet(wb, ws, sheet);
+    });
+    
+    const fileName = `Device_Management_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
@@ -168,7 +236,14 @@ const DeviceManagement = () => {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Device Management</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Manage and monitor all your IoT devices</p>
         </div>
-        <div className="mt-4 sm:mt-0">
+        <div className="mt-4 sm:mt-0 flex gap-2">
+          <button
+            onClick={exportDeviceData}
+            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Export Data
+          </button>
           {user && user.role === 'admin' && (
           <button onClick={handleAdd} className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
             <Plus className="h-4 w-4 mr-2" /> Add Device
