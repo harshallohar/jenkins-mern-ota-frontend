@@ -104,10 +104,12 @@ const OTAUpdates = () => {
   const normalizeStatus = (status) => {
     if (!status) return 'Failed';
     const statusLower = status.toLowerCase();
-    if (statusLower.includes('success') || statusLower.includes('programming successfull')) {
+    if (statusLower.includes('success') && !statusLower.includes('unsuccessful')) {
       return 'Success';
-    } else if (statusLower.includes('fail') || statusLower.includes('unsuccessful')) {
+    } else if (statusLower.includes('unsuccessful') || statusLower.includes('fail')) {
       return 'Failed';
+    } else if (statusLower.includes('already updated')) {
+      return 'In Progress';
     } else {
       return 'In Progress';
     }

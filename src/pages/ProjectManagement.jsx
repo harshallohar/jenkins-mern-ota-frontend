@@ -30,6 +30,7 @@ const ProjectManagement = () => {
   const [selectedProject, setSelectedProject] = useState(null);
   const [viewMode, setViewMode] = useState('cards'); // 'cards' or 'table'
   const [selectedDevice, setSelectedDevice] = useState(null); // Track selected device for filtering
+  const [refreshing, setRefreshing] = useState(false); // Loading state for refresh button
   
   // Admin-specific states
   const [modalOpen, setModalOpen] = useState(false);
@@ -54,16 +55,20 @@ const ProjectManagement = () => {
       const userData = await response.json();
       
       if (userData.projects && userData.projects.length > 0) {
-        // Fetch full project details for each assigned project
-        const projectPromises = userData.projects.map(async (projectId) => {
-          const projectRes = await fetch(`${BACKEND_BASE_URL}/projects/${projectId}`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          return projectRes.json();
+        // Fetch all projects and filter for user's assigned projects
+        const allProjectsRes = await fetch(`${BACKEND_BASE_URL}/projects`, {
+          headers: { Authorization: `Bearer ${token}` }
         });
+        const allProjects = await allProjectsRes.json();
         
-        const projectDetails = await Promise.all(projectPromises);
-        setUserProjects(projectDetails);
+        // Filter projects that belong to the user
+        const userProjectIds = userData.projects.map(id => id.toString());
+        const userProjectDetails = allProjects.filter(project => 
+          userProjectIds.includes(project._id.toString())
+        );
+        
+        setUserProjects(userProjectDetails);
+        setAllProjects(allProjects); // Also set all projects for device filtering
       } else {
         setUserProjects([]);
       }
@@ -99,59 +104,82 @@ const ProjectManagement = () => {
     } catch {}
   };
 
-  // Fetch all data (projects, devices, OTA updates) for statistics
-  const fetchAllData = async () => {
+  // Fetch only essential data for project management
+  const fetchEssentialData = async () => {
     try {
       const token = localStorage.getItem('authToken');
       
-      // Fetch all projects
-      const projectsRes = await fetch(`${BACKEND_BASE_URL}/projects`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const projectsData = await projectsRes.json();
-      setAllProjects(projectsData);
-      
-      // Fetch all devices
-      const devicesRes = await fetch(`${BACKEND_BASE_URL}/devices`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const devicesData = await devicesRes.json();
-      setAllDevices(devicesData);
-      
-      // Fetch all OTA updates
+      if (isAdmin) {
+        // For admin: fetch projects and devices in parallel
+        const [projectsRes, devicesRes] = await Promise.all([
+          fetch(`${BACKEND_BASE_URL}/projects`, {
+            headers: { Authorization: `Bearer ${token}` }
+          }),
+          fetch(`${BACKEND_BASE_URL}/devices`, {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+        ]);
+        
+        const [projectsData, devicesData] = await Promise.all([
+          projectsRes.json(),
+          devicesRes.json()
+        ]);
+        
+        setAllProjects(projectsData);
+        setAllDevices(devicesData);
+      } else {
+        // For regular users: fetch user projects (which also sets allProjects)
+        await fetchUserProjects();
+        // Fetch devices for statistics
+        const devicesRes = await fetch(`${BACKEND_BASE_URL}/devices`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const devicesData = await devicesRes.json();
+        setAllDevices(devicesData);
+      }
+    } catch (err) {
+      console.error('Error fetching essential data:', err);
+      setError('Failed to fetch data');
+    }
+  };
+
+  // Fetch OTA updates only when needed (for statistics)
+  const fetchOTAUpdates = async () => {
+    try {
+      const token = localStorage.getItem('authToken');
       const updatesRes = await fetch(`${BACKEND_BASE_URL}/ota-updates`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const updatesData = await updatesRes.json();
       setOtaUpdates(updatesData);
     } catch (err) {
-      console.error('Error fetching data:', err);
-      setError('Failed to fetch data');
+      console.error('Error fetching OTA updates:', err);
     }
   };
 
   // Refresh OTA updates data for real-time statistics
   const refreshOTAUpdates = async () => {
     try {
-      const token = localStorage.getItem('authToken');
-      const updatesRes = await fetch(`${BACKEND_BASE_URL}/ota-updates`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const updatesData = await updatesRes.json();
-      setOtaUpdates(updatesData);
+      setRefreshing(true);
+      await fetchOTAUpdates();
     } catch (err) {
       console.error('Error refreshing OTA updates:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Lazy load OTA updates when needed for statistics
+  const loadOTAUpdatesIfNeeded = async () => {
+    if (otaUpdates.length === 0) {
+      await fetchOTAUpdates();
     }
   };
 
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      if (isAdmin) {
-        await Promise.all([fetchAllProjects(), fetchAllData()]);
-      } else {
-        await Promise.all([fetchUserProjects(), fetchAllData()]);
-      }
+      await fetchEssentialData();
       setLoading(false);
     };
     loadData();
@@ -192,7 +220,8 @@ const ProjectManagement = () => {
     try {
       const token = localStorage.getItem('authToken');
       await fetch(`${BACKEND_BASE_URL}/projects/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-      fetchAllProjects();
+      // Only refresh essential data - no need to fetch OTA updates
+      await fetchEssentialData();
     } catch (err) {
       setError('Failed to delete project');
       setLoading(false);
@@ -219,8 +248,8 @@ const ProjectManagement = () => {
         });
       }
       setModalOpen(false);
-      fetchAllProjects();
-      fetchAllData();
+      // Only refresh essential data
+      await fetchEssentialData();
     } catch (err) {
       setError('Failed to save project');
       setLoading(false);
@@ -265,6 +294,11 @@ const ProjectManagement = () => {
     const failedCount = projectUpdates.filter(u => 
       u.normalizedStatus === 'Failed' || u.status === 'Failed'
     ).length;
+    
+    // Trigger lazy loading of OTA updates if we have devices but no updates
+    if (filteredDevices.length > 0 && otaUpdates.length === 0) {
+      loadOTAUpdatesIfNeeded();
+    }
     
     return {
       totalDevices: filteredDevices.length,
@@ -354,7 +388,10 @@ const ProjectManagement = () => {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Loading projects...</p>
+        </div>
       </div>
     );
   }
@@ -488,10 +525,15 @@ const ProjectManagement = () => {
         <div className="mt-4 sm:mt-0 flex items-center gap-3">
           <button
             onClick={refreshOTAUpdates}
-            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            disabled={refreshing}
+            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="Refresh Data"
           >
-            <Activity className="h-4 w-4" />
+            {refreshing ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600"></div>
+            ) : (
+              <Activity className="h-4 w-4" />
+            )}
           </button>
           <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
             <button

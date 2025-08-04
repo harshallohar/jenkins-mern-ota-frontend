@@ -11,6 +11,7 @@ import AddNewDevice from './pages/AddNewDevice';
 import AddNewUser from './pages/AddNewUser';
 import Login from './pages/Login';
 import ProjectManagement from './pages/ProjectManagement';
+import StatusManagement from './pages/StatusManagement';
 import './App.css';
 
 function PageWithTitle({ title, children }) {
@@ -59,6 +60,8 @@ function App() {
                   <Route path="/devices" element={user && user.role === 'admin' ? <PageWithTitle title="Device Management"><DeviceManagement /></PageWithTitle> : <Navigate to="/dashboard" />} />
                   {/* Only admin can access User Management */}
                   <Route path="/users" element={user && user.role === 'admin' ? <PageWithTitle title="User Management"><UserManagement /></PageWithTitle> : <Navigate to="/dashboard" />} />
+                  {/* Status Management (admin only) */}
+                  <Route path="/status-management" element={user && user.role === 'admin' ? <PageWithTitle title="Status Management"><StatusManagement /></PageWithTitle> : <Navigate to="/dashboard" />} />
                   {/* Firmware Management (admin only) */}
                   <Route path="/firmware" element={user && (user.role === 'admin' || user.canAccessFirmware) ? <PageWithTitle title="Firmware Management"><FirmwareManagement /></PageWithTitle> : <Navigate to="/dashboard" />} />
                   <Route path="/ota-updates" element={<PageWithTitle title="OTA Updates"><OTAUpdates /></PageWithTitle>} />

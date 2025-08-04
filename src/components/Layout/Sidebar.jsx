@@ -10,7 +10,8 @@ import {
   Plus,
   X,
   LogOut,
-  Upload
+  Upload,
+  Settings
 } from 'lucide-react';
 import logo from '../../assets/logo.png';
 import Select from 'react-select';
@@ -259,6 +260,20 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
                       User Management
                     </Link>
                   )}
+                  {/* Status Management (admin only) */}
+                  {user && user.role === 'admin' && (
+                    <Link
+                      to="/status-management"
+                      className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                        isActive('/status-management')
+                          ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      <Settings className="mr-3 h-5 w-5" />
+                      Status Management
+                    </Link>
+                  )}
                 </div>
 
                 {/* Quick Actions - Admin Only */}
@@ -377,7 +392,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
                     Device Management
                   </Link>
                 )}
-                {/* Conditionally render User Management and Firmware Management for admin only */}
+                {/* Conditionally render User Management, Status Management and Firmware Management for admin only */}
                 {user && user.role === 'admin' && (
                   <>
                     <Link
@@ -391,6 +406,18 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
                     >
                       <Users className="mr-3 h-5 w-5" />
                       User Management
+                    </Link>
+                    <Link
+                      to="/status-management"
+                      onClick={() => setIsOpen(false)}
+                      className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                        isActive('/status-management')
+                          ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      <Settings className="mr-3 h-5 w-5" />
+                      Status Management
                     </Link>
                     <Link
                       to="/firmware"
