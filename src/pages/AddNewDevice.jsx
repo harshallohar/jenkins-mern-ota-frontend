@@ -53,30 +53,45 @@ const AddNewDevice = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
+      const token = localStorage.getItem('authToken');
       const res = await fetch(`${BACKEND_BASE_URL}/devices`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           name: formData.name,
           deviceId: formData.id
         })
       });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || 'Failed to add device');
+      }
+      
       const device = await res.json();
+      
       // Assign project if admin and project selected
       const user = JSON.parse(localStorage.getItem('user'));
       if (user && user.role === 'admin' && selectedProject) {
-        const token = localStorage.getItem('authToken');
-        await fetch(`${BACKEND_BASE_URL}/devices/${device._id}/assign-project`, {
+        const assignRes = await fetch(`${BACKEND_BASE_URL}/devices/${device._id}/assign-project`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ projectId: selectedProject.value })
         });
+        
+        if (!assignRes.ok) {
+          console.warn('Failed to assign device to project, but device was created successfully');
+        }
       }
+      
       setIsLoading(false);
       navigate('/devices');
     } catch (err) {
       setIsLoading(false);
-      alert('Failed to add device');
+      console.error('Error adding device:', err);
+      alert(err.message || 'Failed to add device');
     }
   };
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import Select from 'react-select';
-import { CheckCircle, XCircle, Clock, Download, Activity, Smartphone, HardDrive } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Download, Activity, Smartphone, HardDrive, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { BACKEND_BASE_URL } from '../utils/api';
 import RecentActivities from '../components/RecentActivities';
@@ -10,6 +10,9 @@ const DEVICES_API = `${BACKEND_BASE_URL}/devices`;
 const FIRMWARE_API = `${BACKEND_BASE_URL}/firmware/firmwares-details`;
 const OTA_API = `${BACKEND_BASE_URL}/ota-updates`;
 const PROJECTS_API = `${BACKEND_BASE_URL}/projects`;
+const DASHBOARD_STATS_API = `${BACKEND_BASE_URL}/ota-updates/dashboard-esp-stats`;
+const DAILY_STATS_API = `${BACKEND_BASE_URL}/ota-updates/daily-device-stats`;
+const WEEKLY_STATS_API = `${BACKEND_BASE_URL}/ota-updates/weekly-device-stats`;
 
 const Dashboard = () => {
   const [timeRange, setTimeRange] = useState('7d');
@@ -21,6 +24,13 @@ const Dashboard = () => {
   const [error, setError] = useState('');
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
+  
+  // New state for ESP-level statistics
+  const [espStats, setEspStats] = useState(null);
+  const [dailyStats, setDailyStats] = useState([]);
+  const [weeklyStats, setWeeklyStats] = useState([]);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Detect dark mode for recharts and react-select
   const [isDark, setIsDark] = useState(false);
@@ -79,6 +89,92 @@ const Dashboard = () => {
     };
     fetchProjects();
   }, []);
+
+  // Refresh all dashboard data
+  const refreshDashboard = async () => {
+    setRefreshing(true);
+    try {
+      // Fetch all data again
+      const token = localStorage.getItem('authToken');
+      const [devRes, fwRes, otaRes, projectsRes] = await Promise.all([
+        fetch(DEVICES_API, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(FIRMWARE_API, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(OTA_API, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(PROJECTS_API, { headers: { Authorization: `Bearer ${token}` } })
+      ]);
+      
+      if (devRes.status === 401 || fwRes.status === 401 || otaRes.status === 401 || projectsRes.status === 401) {
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+        return;
+      }
+      
+      const devData = await devRes.json();
+      setDevices(Array.isArray(devData) ? devData : []);
+      const fwData = await fwRes.json();
+      setFirmwares(Array.isArray(fwData) ? fwData : []);
+      const otaData = await otaRes.json();
+      setOtaUpdates(Array.isArray(otaData) ? otaData : []);
+      const projectsData = await projectsRes.json();
+      setProjects(Array.isArray(projectsData) ? projectsData : []);
+      
+      // Refresh ESP statistics
+      await fetchESPStats();
+      
+    } catch (err) {
+      setError('Failed to refresh dashboard data');
+    }
+    setRefreshing(false);
+  };
+
+  // Fetch ESP-level statistics
+  const fetchESPStats = async () => {
+    setStatsLoading(true);
+    try {
+      const startDate = getStartDate();
+      const endDate = new Date(Date.UTC(
+        utcNow.getUTCFullYear(),
+        utcNow.getUTCMonth(),
+        utcNow.getUTCDate(),
+        23, 59, 59, 999
+      ));
+      
+      const projectId = selectedProject?.value;
+      
+      // Fetch dashboard ESP stats
+      const dashboardRes = await fetch(
+        `${DASHBOARD_STATS_API}?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}${projectId ? `&projectId=${projectId}` : ''}`
+      );
+      const dashboardData = await dashboardRes.json();
+      setEspStats(dashboardData);
+      
+      // Fetch daily stats for charts
+      const dailyRes = await fetch(
+        `${DAILY_STATS_API}?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}${projectId ? `&projectId=${projectId}` : ''}`
+      );
+      const dailyData = await dailyRes.json();
+      setDailyStats(dailyData);
+      
+      // Fetch weekly stats for charts (if time range is 30d or 90d)
+      if (timeRange === '30d' || timeRange === '90d') {
+        const weeklyRes = await fetch(
+          `${WEEKLY_STATS_API}?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}${projectId ? `&projectId=${projectId}` : ''}`
+        );
+        const weeklyData = await weeklyRes.json();
+        setWeeklyStats(weeklyData);
+      }
+    } catch (err) {
+      console.error('Error fetching device stats:', err);
+      setError('Failed to fetch device statistics');
+    }
+    setStatsLoading(false);
+  };
+
+  // Fetch ESP stats when time range or project changes
+  useEffect(() => {
+    fetchESPStats();
+  }, [timeRange, selectedProject]);
 
   // Defensive: if devices is not an array, show error
   if (!Array.isArray(devices)) {
@@ -383,8 +479,8 @@ const Dashboard = () => {
     return filtered;
   }, [otaUpdates, startDate, selectedDevice, selectedProject, devices]);
 
-  // Stats
-  const totalDevices = filteredDevices.length;
+  // Stats - using ESP-level statistics
+  const totalESPs = espStats?.totalESPs || filteredDevices.length;
   const totalFirmwares = selectedDevice
     ? firmwares.filter(fw => {
         // Handle device ID format mismatches (with/without 0x prefix)
@@ -399,306 +495,94 @@ const Dashboard = () => {
                firmwareDeviceIdWithoutPrefix === deviceIdToMatch;
       }).length
     : 0;
-  const totalSuccess = filteredUpdates.filter(u => normalizeStatus(u.status, u.normalizedStatus) === 'Success').length;
-  const totalFailed = filteredUpdates.filter(u => normalizeStatus(u.status, u.normalizedStatus) === 'Failed').length;
+  
+  // Total PIC experiences (counting each PIC experience separately)
+  const totalSuccess = espStats?.totalPicsWithSuccess || 0;
+  const totalFailed = espStats?.totalPicsWithFailure || 0;
 
-  // Pie chart data
+  // Pie chart data - using total PIC experiences
   const pieData = [
-    { name: 'Success', value: filteredUpdates.filter(u => normalizeStatus(u.status, u.normalizedStatus) === 'Success').length, color: '#10B981' },
-    { name: 'Failed', value: filteredUpdates.filter(u => normalizeStatus(u.status, u.normalizedStatus) === 'Failed').length, color: '#EF4444' },
-  ];
+    { name: 'Total PIC Success Experiences', value: totalSuccess, color: '#10B981' },
+    { name: 'Total PIC Failure Experiences', value: totalFailed, color: '#EF4444' },
+  ].filter(item => item.value > 0); // Only show categories with data
 
-  // Bar chart data
+  // Bar chart data - using device-level statistics
   const barData = useMemo(() => {
     console.log('=== BAR CHART DATA GENERATION ===');
-    console.log('Filtered Updates Count:', filteredUpdates.length);
     console.log('Time Range:', timeRange);
     console.log('Selected Project:', selectedProject?.label);
     console.log('Selected Device:', selectedDevice?.label);
     
     if (timeRange === '7d') {
-      // Use filteredUpdates which already has proper date filtering
-      if (filteredUpdates.length === 0) {
-        console.log('No filtered updates found, returning empty data');
+      // Use daily stats for 7-day view
+      if (dailyStats.length === 0) {
+        console.log('No daily stats found, returning empty data');
         return [];
       }
       
-      // Create 7-day range ending on today (UTC)
-      const today = new Date(Date.UTC(
-        utcNow.getUTCFullYear(),
-        utcNow.getUTCMonth(),
-        utcNow.getUTCDate()
-      ));
-      console.log('Today is (UTC):', today.toISOString(), 'Day of week:', today.toLocaleDateString(undefined, { weekday: 'long' }));
-      
-      const days = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(Date.UTC(
-          utcNow.getUTCFullYear(),
-          utcNow.getUTCMonth(),
-          utcNow.getUTCDate() - (6 - i)  // 6 days ago (i=0) to today (i=6)
-        ));
-        return d;
-      });
-      
-      console.log('7-day range ending on today (UTC):', days.map(d => ({
-        date: d.toISOString().slice(0, 10),
-        day: d.toLocaleDateString(undefined, { weekday: 'short' }),
-        fullDay: d.toLocaleDateString(undefined, { weekday: 'long' })
-      })));
-      
-      const result = days.map(day => {
-        const dayStr = day.toISOString().slice(0, 10);
-        const dayUpdates = filteredUpdates.filter(u => {
-          // Handle different date formats
-          const updateDate = u.date || u.createdAt || u.updatedAt;
-          if (!updateDate) return false;
-          
-          // Convert to Date object and then to string for comparison
-          const date = new Date(updateDate);
-          if (isNaN(date.getTime())) return false;
-          
-          const updateDayStr = date.toISOString().slice(0, 10);
-          const matches = updateDayStr === dayStr;
-          
-          // Only log if it's July 29th or 30th data to reduce noise
-          if (updateDayStr === '2025-07-29' || updateDayStr === '2025-07-30') {
-            console.log(`Day comparison for ${dayStr}:`, {
-              updateDate: updateDate,
-              updateDayStr: updateDayStr,
-              dayStr: dayStr,
-              matches: matches,
-              deviceId: u.deviceId,
-              status: u.status
-            });
-          }
-          
-          return matches;
-        });
-        
-        const successCount = dayUpdates.filter(u => normalizeStatus(u.status, u.normalizedStatus) === 'Success').length;
-        const failedCount = dayUpdates.filter(u => normalizeStatus(u.status, u.normalizedStatus) === 'Failed').length;
-        
-        console.log(`Day ${dayStr} (${day.toLocaleDateString(undefined, { weekday: 'short' })}):`, {
-          totalUpdates: dayUpdates.length,
-          success: successCount,
-          failed: failedCount
-        });
-        
-        return {
-          name: day.toLocaleDateString(undefined, { weekday: 'short' }),
-          date: day.toISOString().slice(0, 10), // Add actual date for tooltip
-          fullDate: day.toLocaleDateString(undefined, { 
-            weekday: 'long', 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric' 
-          }), // Add full date for tooltip
-          Success: successCount,
-          Failed: failedCount,
-        };
-      });
+      const result = dailyStats.map(day => ({
+        name: day.dayName,
+        date: day.date,
+        fullDate: day.fullDate,
+        'Total PIC Success Experiences': day.devicesWithSuccess,
+        'Total PIC Failure Experiences': day.devicesWithFailure,
+      }));
       
       console.log('Final 7d bar data:', result);
       return result;
     } else if (timeRange === '30d') {
-      // Use filteredUpdates which already has proper date filtering
-      if (filteredUpdates.length === 0) {
-        console.log('No filtered updates found, returning empty data');
+      // Use weekly stats for 30-day view
+      if (weeklyStats.length === 0) {
+        console.log('No weekly stats found, returning empty data');
         return [];
       }
       
-      // Create 4 weeks ending on today
-      const weeks = Array.from({ length: 4 }, (_, i) => {
-        // Calculate weeks according to user's logic:
-        // Week 1: 3-9 (oldest)
-        // Week 2: 10-16
-        // Week 3: 17-23
-        // Week 4: 24-30 (newest, ending on today)
-        
-        // For Week 1: start = today - 27, end = today - 21
-        // For Week 2: start = today - 20, end = today - 14
-        // For Week 3: start = today - 13, end = today - 7
-        // Week 4: start = today - 6, end = today
-        
-        const start = new Date(Date.UTC(
-          utcNow.getUTCFullYear(),
-          utcNow.getUTCMonth(),
-          utcNow.getUTCDate() - (27 - (i * 7))  // Week 1: -27, Week 2: -20, Week 3: -13, Week 4: -6
-        ));
-        
-        const end = new Date(Date.UTC(
-          utcNow.getUTCFullYear(),
-          utcNow.getUTCMonth(),
-          utcNow.getUTCDate() - (21 - (i * 7)),  // Week 1: -21, Week 2: -14, Week 3: -7, Week 4: 0
-          23, 59, 59, 999
-        ));
-        
-        // VERY OBVIOUS DEBUG - This should show in console
-        console.log(`🚨 WEEK ${i + 1} CALCULATION:`, {
-          week: i + 1,
-          startDate: start.toISOString().slice(0, 10),
-          endDate: end.toISOString().slice(0, 10),
-          startDay: start.getUTCDate(),
-          endDay: end.getUTCDate(),
-          today: utcNow.getUTCDate()
-        });
-            
-        return { start, end };
-      });
-      
-      console.log('30-day range ending on today (UTC):', weeks.map((week, i) => ({
-        week: i + 1,
-        start: week.start.toISOString().slice(0, 10),
-        end: week.end.toISOString().slice(0, 10),
-        days: `${week.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - ${week.end.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
-      })));
-      
-      // Debug: Log all filtered updates to see what data we have
-      console.log('All filtered updates for 30d:', filteredUpdates.map(u => ({
-        deviceId: u.deviceId,
-        status: u.status,
-        date: u.date,
-        normalized: normalizeStatus(u.status, u.normalizedStatus)
-      })));
-      
-      // Debug: Show which week each update belongs to
-      console.log('=== UPDATE TO WEEK MAPPING ===');
-      filteredUpdates.forEach(u => {
-        const updateDate = new Date(u.date || u.createdAt || u.updatedAt);
-        const updateDateStr = updateDate.toISOString().slice(0, 10);
-        
-        for (let i = 0; i < weeks.length; i++) {
-          const week = weeks[i];
-          const weekStart = week.start.toISOString().slice(0, 10);
-          const weekEnd = week.end.toISOString().slice(0, 10);
-          
-          if (updateDateStr >= weekStart && updateDateStr <= weekEnd) {
-            console.log(`Update ${updateDateStr} (${u.deviceId}) belongs to Week ${i + 1} (${weekStart} - ${weekEnd})`);
-            break;
-          }
-        }
-      });
-      
-      const result = weeks.map((week, i) => {
-        const weekUpdates = filteredUpdates.filter(u => {
-          const updateDate = u.date || u.createdAt || u.updatedAt;
-          if (!updateDate) return false;
-          
-          const date = new Date(updateDate);
-          if (isNaN(date.getTime())) return false;
-          
-          const isInWeek = date >= week.start && date <= week.end;
-          
-          // Debug each update for all weeks to see the distribution
-          console.log(`Week ${i + 1} - Update check:`, {
-            updateDate: updateDate,
-            parsedDate: date.toISOString().slice(0, 10),
-            weekStart: week.start.toISOString().slice(0, 10),
-            weekEnd: week.end.toISOString().slice(0, 10),
-            isInWeek: isInWeek,
-            deviceId: u.deviceId,
-            status: u.status
-          });
-          
-          return isInWeek;
-        });
-        
-        const successCount = weekUpdates.filter(u => normalizeStatus(u.status, u.normalizedStatus) === 'Success').length;
-        const failedCount = weekUpdates.filter(u => normalizeStatus(u.status, u.normalizedStatus) === 'Failed').length;
-        
-        // Log all weeks, not just those with data
-        console.log(`Week ${i + 1} (${week.start.toISOString().slice(0, 10)} - ${week.end.toISOString().slice(0, 10)}):`, {
-          totalUpdates: weekUpdates.length,
-          success: successCount,
-          failed: failedCount,
-          updates: weekUpdates.map(u => ({
-            deviceId: u.deviceId,
-            status: u.status,
-            date: u.date,
-            normalized: normalizeStatus(u.status, u.normalizedStatus)
-          }))
-        });
-        
-        return {
-          name: `Week ${i + 1}`,
-          date: `${week.start.toISOString().slice(0, 10)} to ${week.end.toISOString().slice(0, 10)}`,
-          fullDate: `Week ${i + 1}: ${week.start.getUTCDate()} ${week.start.toLocaleDateString(undefined, { month: 'short' })} - ${week.end.getUTCDate()} ${week.end.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}`,
-          Success: successCount,
-          Failed: failedCount,
-        };
-      });
+      const result = weeklyStats.map(week => ({
+        name: week.week,
+        date: week.dateRange,
+        fullDate: week.dateRange,
+        'Total PIC Success Experiences': week.devicesWithSuccess,
+        'Total PIC Failure Experiences': week.devicesWithFailure,
+      }));
       
       console.log('Final 30d bar data:', result);
       return result;
     } else if (timeRange === '90d') {
-      // Use filteredUpdates which already has proper date filtering
-      if (filteredUpdates.length === 0) {
-        console.log('No filtered updates found, returning empty data');
+      // Use weekly stats for 90-day view (grouped by month)
+      if (weeklyStats.length === 0) {
+        console.log('No weekly stats found, returning empty data');
         return [];
       }
       
-      // Create 90-day range ending on today (UTC)
-      const today = new Date(Date.UTC(
-        utcNow.getUTCFullYear(),
-        utcNow.getUTCMonth(),
-        utcNow.getUTCDate()
-      ));
-      console.log('Today is (UTC):', today.toISOString(), 'Day of week:', today.toLocaleDateString(undefined, { weekday: 'long' }));
-      
-      // Create 3 months ending on today (UTC)
-      const months = Array.from({ length: 3 }, (_, i) => {
-        const d = new Date(Date.UTC(
-          utcNow.getUTCFullYear(),
-          utcNow.getUTCMonth() - 2 + i,
-          1
-        ));
-        return d;
+      // Group weekly stats by month
+      const monthlyStats = {};
+      weeklyStats.forEach(week => {
+        const monthKey = week.dateRange.split(' - ')[0].split(' ')[0]; // Get month name
+        if (!monthlyStats[monthKey]) {
+          monthlyStats[monthKey] = {
+            devicesWithSuccess: 0,
+            devicesWithFailure: 0,
+            totalDevices: 0
+          };
+        }
+        monthlyStats[monthKey].devicesWithSuccess += week.devicesWithSuccess;
+        monthlyStats[monthKey].devicesWithFailure += week.devicesWithFailure;
+        monthlyStats[monthKey].totalDevices += week.totalDevices;
       });
       
-      console.log('90-day range ending on today (UTC):', months.map((month, i) => ({
-        month: i + 1,
-        name: month.toLocaleString(undefined, { month: 'short' }),
-        date: month.toISOString().slice(0, 10)
-      })));
-      
-      const result = months.map((month, i) => {
-        const monthStr = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`;
-        const monthUpdates = filteredUpdates.filter(u => {
-          const updateDate = u.date || u.createdAt || u.updatedAt;
-          if (!updateDate) return false;
-          
-          const date = new Date(updateDate);
-          if (isNaN(date.getTime())) return false;
-          
-          return date.getFullYear() === month.getFullYear() && date.getMonth() === month.getMonth();
-        });
-        
-        const successCount = monthUpdates.filter(u => normalizeStatus(u.status, u.normalizedStatus) === 'Success').length;
-        const failedCount = monthUpdates.filter(u => normalizeStatus(u.status, u.normalizedStatus) === 'Failed').length;
-        
-        console.log(`Month ${monthStr}:`, {
-          totalUpdates: monthUpdates.length,
-          success: successCount,
-          failed: failedCount
-        });
-        
-        return {
-          name: month.toLocaleString(undefined, { month: 'short' }),
-          date: month.toISOString().slice(0, 10),
-          fullDate: month.toLocaleDateString(undefined, { 
-            month: 'long', 
-            year: 'numeric' 
-          }),
-          Success: successCount,
-          Failed: failedCount,
-        };
-      });
+      const result = Object.entries(monthlyStats).map(([month, stats]) => ({
+        name: month,
+        date: month,
+        fullDate: month,
+        'Total PIC Success Experiences': stats.devicesWithSuccess,
+        'Total PIC Failure Experiences': stats.devicesWithFailure,
+      }));
       
       console.log('Final 90d bar data:', result);
       return result;
     }
     return [];
-  }, [filteredUpdates, timeRange, selectedProject, selectedDevice]);
+  }, [dailyStats, weeklyStats, timeRange, selectedProject, selectedDevice]);
 
 
 
@@ -835,33 +719,27 @@ const Dashboard = () => {
   // Card config for consistent style
   const cardStats = [
     {
-      label: 'Total Devices',
-      valueKey: 'totalDevices',
+      label: 'Total ESPs',
+      valueKey: 'totalESPs',
       icon: Smartphone,
       iconBg: iconBg.blue,
-      sub: '+0% from last period',
+      sub: 'ESPs in selected project',
     },
     {
-      label: 'Total Firmwares Uploaded',
-      valueKey: 'totalFirmwares',
-      icon: HardDrive,
-      iconBg: iconBg.purple,
-      sub: '+0% from last period',
-    },
-    {
-      label: 'Total Success',
+              label: 'Total PIC Success Experiences',
       valueKey: 'totalSuccess',
       icon: CheckCircle,
       iconBg: iconBg.green,
-      sub: '+0% from last period',
+      sub: 'Total PIC experiences with success',
     },
     {
-      label: 'Total Failures',
+      label: 'ESPs with PIC Failure',
       valueKey: 'totalFailed',
       icon: XCircle,
       iconBg: iconBg.red,
-      sub: '+0% from last period',
+      sub: 'Total PIC experiences with failures',
     },
+
   ];
 
   // Custom tooltip for bar chart
@@ -875,8 +753,8 @@ const Dashboard = () => {
         <div className="rounded-lg bg-white dark:bg-gray-800 shadow px-4 py-2 border border-gray-200 dark:border-gray-700">
           <div className="font-semibold text-gray-900 dark:text-white mb-1">{date}</div>
           <div className="flex flex-col gap-1">
-            <span className="text-green-600 dark:text-green-400">Total Success: <b>{payload.find(p => p.dataKey === 'Success')?.value ?? 0}</b></span>
-            <span className="text-red-600 dark:text-red-400">Total Failures: <b>{payload.find(p => p.dataKey === 'Failed')?.value ?? 0}</b></span>
+            <span className="text-green-600 dark:text-green-400">Total PIC Success Experiences: <b>{payload.find(p => p.dataKey === 'Total PIC Success Experiences')?.value ?? 0}</b></span>
+            <span className="text-red-600 dark:text-red-400">Total PIC Failure Experiences: <b>{payload.find(p => p.dataKey === 'Total PIC Failure Experiences')?.value ?? 0}</b></span>
           </div>
         </div>
       );
@@ -1029,13 +907,23 @@ const Dashboard = () => {
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Key Metrics</h3>
-          <button
-            onClick={downloadStatsData}
-            className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors"
-          >
-            <Download className="h-4 w-4" />
-            Export Stats
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={refreshDashboard}
+              disabled={refreshing}
+              className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white text-sm rounded-lg transition-colors"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <button
+              onClick={downloadStatsData}
+              className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors"
+            >
+              <Download className="h-4 w-4" />
+              Export Stats
+            </button>
+          </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {(!selectedDevice
@@ -1044,8 +932,7 @@ const Dashboard = () => {
           ).map((stat, i) => {
             const Icon = stat.icon;
             const value = (() => {
-              if (stat.valueKey === 'totalDevices') return totalDevices;
-              if (stat.valueKey === 'totalFirmwares') return totalFirmwares;
+              if (stat.valueKey === 'totalESPs') return totalESPs;
               if (stat.valueKey === 'totalSuccess') return totalSuccess;
               if (stat.valueKey === 'totalFailed') return totalFailed;
               return 0;
@@ -1082,7 +969,7 @@ const Dashboard = () => {
               <div>
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white">Device Activity</h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Success vs Failure devices over the last {timeRange === '7d' ? '7 days' : timeRange === '30d' ? '4 weeks' : '3 months'}
+                  Total PIC success/failure experiences over the last {timeRange === '7d' ? '7 days' : timeRange === '30d' ? '4 weeks' : '3 months'}
                 </p>
               </div>
               <button
@@ -1113,8 +1000,8 @@ const Dashboard = () => {
                     }}
                   />
                   <Legend content={<CustomLegend />} />
-                  <Bar dataKey="Success" name="success" fill="#2563eb" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="Failed" name="failure" fill="#d9f99d" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="Total PIC Success Experiences" name="Total PIC Success Experiences" fill="#10B981" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="Total PIC Failure Experiences" name="Total PIC Failure Experiences" fill="#EF4444" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -1129,13 +1016,23 @@ const Dashboard = () => {
                   Export filtered OTA updates data
                 </p>
               </div>
-              <button
-                onClick={downloadFilteredUpdates}
-                className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors"
-              >
-                <Download className="h-4 w-4" />
-                Export Data
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={refreshDashboard}
+                  disabled={refreshing}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white text-sm rounded-lg transition-colors"
+                >
+                  <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                  {refreshing ? 'Refreshing...' : 'Refresh'}
+                </button>
+                <button
+                  onClick={downloadFilteredUpdates}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors"
+                >
+                  <Download className="h-4 w-4" />
+                  Export Data
+                </button>
+              </div>
             </div>
             <div className="text-sm text-gray-600 dark:text-gray-400">
               <p>• Total Records: {filteredUpdates.length}</p>
@@ -1148,7 +1045,7 @@ const Dashboard = () => {
           {/* OTA Update Status Pie Chart */}
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white">OTA Update Status</h3>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white">ESP PIC Experience Distribution</h3>
               <button
                 onClick={downloadPieChartData}
                 className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors"
