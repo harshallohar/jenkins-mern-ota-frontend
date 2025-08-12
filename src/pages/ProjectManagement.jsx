@@ -20,7 +20,7 @@ import {
 import Select from 'react-select';
 import * as XLSX from 'xlsx';
 
-const ProManagement = () => {
+const ProjectManagementOtA = () => {
   const [userProjects, setUserProjects] = useState([]);
   const [allProjects, setAllProjects] = useState([]);
   const [allDevices, setAllDevices] = useState([]);
