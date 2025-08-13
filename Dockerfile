@@ -1,6 +1,5 @@
 # Stage 1: Build the frontend using Node
 FROM node:20-alpine AS builder
- AS builder
 
 WORKDIR /app
 
