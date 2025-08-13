@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { BACKEND_BASE_URL } from '../utils/api';
 
-const RecentActivities = () => {
+const RecentActivities = ({ compact = false }) => {
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -29,11 +29,12 @@ const RecentActivities = () => {
     currentPage: 1,
     totalPages: 1,
     totalItems: 0,
-    itemsPerPage: 20
+    itemsPerPage: compact ? 5 : 20
   });
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [unreadCount, setUnreadCount] = useState(0);
   const [selectedActivities, setSelectedActivities] = useState([]);
+  const [includeSystemActivities, setIncludeSystemActivities] = useState(true);
 
   const user = JSON.parse(localStorage.getItem('user'));
 
@@ -131,12 +132,16 @@ const RecentActivities = () => {
       const token = localStorage.getItem('authToken');
       const params = new URLSearchParams({
         page: page.toString(),
-        limit: pagination.itemsPerPage.toString()
+        limit: pagination.itemsPerPage.toString(),
+        includeSystem: includeSystemActivities.toString()
       });
       
       if (filter !== 'all') {
         params.append('activityType', filter);
       }
+
+      console.log('Fetching activities with params:', params.toString());
+      console.log('Token:', token ? 'Present' : 'Missing');
 
       const response = await fetch(`${BACKEND_BASE_URL}/recent-activities?${params}`, {
         headers: {
@@ -144,14 +149,20 @@ const RecentActivities = () => {
         }
       });
 
+      console.log('Response status:', response.status);
+
       if (!response.ok) {
-        throw new Error('Failed to fetch activities');
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+        throw new Error(`Failed to fetch activities: ${response.status} ${errorText}`);
       }
 
       const data = await response.json();
+      console.log('Activities data:', data);
       setActivities(data.activities);
       setPagination(data.pagination);
     } catch (err) {
+      console.error('Error in fetchActivities:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -168,9 +179,15 @@ const RecentActivities = () => {
         }
       });
 
+      console.log('Unread count response status:', response.status);
+
       if (response.ok) {
         const data = await response.json();
+        console.log('Unread count data:', data);
         setUnreadCount(data.unreadCount);
+      } else {
+        const errorText = await response.text();
+        console.error('Unread count error response:', errorText);
       }
     } catch (err) {
       console.error('Error fetching unread count:', err);
@@ -297,11 +314,11 @@ const RecentActivities = () => {
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+      <div className={`${compact ? 'px-4 py-3' : 'px-6 py-4'} border-b border-gray-200 dark:border-gray-700`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Activity className="h-6 w-6 text-blue-600" />
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+            <Activity className={`${compact ? 'h-5 w-5' : 'h-6 w-6'} text-blue-600`} />
+            <h2 className={`${compact ? 'text-lg' : 'text-xl'} font-semibold text-gray-900 dark:text-white`}>
               Recent Activities
             </h2>
             {unreadCount > 0 && (
@@ -341,26 +358,42 @@ const RecentActivities = () => {
         </div>
       </div>
 
-      {/* Filter */}
-      <div className="px-6 py-3 border-b border-gray-200 dark:border-gray-700">
-        <div className="flex items-center gap-3">
-          <Filter className="h-4 w-4 text-gray-500" />
-          <select
-            value={selectedFilter}
-            onChange={(e) => handleFilterChange(e.target.value)}
-            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            {activityTypeOptions.map(option => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+      {/* Filter and Select All */}
+      <div className={`${compact ? 'px-4 py-2' : 'px-6 py-3'} border-b border-gray-200 dark:border-gray-700`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Filter className="h-4 w-4 text-gray-500" />
+            <select
+              value={selectedFilter}
+              onChange={(e) => handleFilterChange(e.target.value)}
+              className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              {activityTypeOptions.map(option => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          {activities.length > 0 && (
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={selectedActivities.length === activities.length && activities.length > 0}
+                onChange={handleSelectAll}
+                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              />
+              <span className="text-sm text-gray-600 dark:text-gray-300">
+                Select All ({selectedActivities.length}/{activities.length})
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Content */}
-      <div className="p-6">
+      <div className={compact ? "p-4" : "p-6"}>
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <RefreshCw className="h-6 w-6 text-gray-400 animate-spin" />
@@ -379,11 +412,11 @@ const RecentActivities = () => {
         ) : (
           <>
             {/* Activities List */}
-            <div className="space-y-3">
+            <div className={`${compact ? 'space-y-2' : 'space-y-3'}`}>
               {activities.map((activity) => (
                 <div
                   key={activity._id}
-                  className={`p-4 rounded-lg border transition-colors ${
+                  className={`${compact ? 'p-3' : 'p-4'} rounded-lg border transition-colors ${
                     activity.isRead
                       ? 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'
                       : 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800'
@@ -407,10 +440,10 @@ const RecentActivities = () => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1">
-                          <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+                          <h3 className={`${compact ? 'text-xs' : 'text-sm'} font-medium text-gray-900 dark:text-white`}>
                             {activity.title}
                           </h3>
-                          <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                          <p className={`${compact ? 'text-xs' : 'text-sm'} text-gray-600 dark:text-gray-300 mt-1`}>
                             {activity.description}
                           </p>
                           <div className="flex items-center gap-2 mt-2">

@@ -60,7 +60,7 @@ const UploadFirmwareModal = ({
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 self-start">Drag and drop a file or click to select.</p>
             
             {/* Expected filename display */}
-            {selectedProject && selectedDevice && (
+            {selectedProject && selectedDevice ? (
               <div className="w-full mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                 <p className="text-sm text-blue-800 dark:text-blue-200 font-medium mb-1">
                   Expected filename format:
@@ -69,28 +69,46 @@ const UploadFirmwareModal = ({
                   {expectedFilename}.bin
                 </p>
               </div>
+            ) : (
+              <div className="w-full mb-4 p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-gray-400 font-medium mb-1">
+                  Setup Required:
+                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-500">
+                  Please select a project and device to enable file upload
+                </p>
+              </div>
             )}
 
             <div
-              className={`w-full h-44 border-2 border-dashed rounded-xl flex flex-col items-center justify-center cursor-pointer transition mb-2 ${
-                file 
-                  ? isFilenameValid 
-                    ? 'border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20' 
-                    : 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20'
-                  : 'border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800'
+              className={`w-full h-44 border-2 border-dashed rounded-xl flex flex-col items-center justify-center transition mb-2 ${
+                !selectedProject || !selectedDevice
+                  ? 'border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 cursor-not-allowed opacity-50'
+                  : file 
+                    ? isFilenameValid 
+                      ? 'border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20 cursor-pointer' 
+                      : 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 cursor-pointer'
+                    : 'border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer'
               }`}
-              onDrop={handleDrop}
-              onDragOver={e => e.preventDefault()}
-              onClick={() => fileInputRef.current && fileInputRef.current.click()}
+              onDrop={(!selectedProject || !selectedDevice) ? undefined : handleDrop}
+              onDragOver={(!selectedProject || !selectedDevice) ? undefined : (e => e.preventDefault())}
+              onClick={(!selectedProject || !selectedDevice) ? undefined : (() => fileInputRef.current && fileInputRef.current.click())}
             >
               <Upload className={`h-12 w-12 mb-2 ${
-                file 
-                  ? isFilenameValid 
-                    ? 'text-green-500' 
-                    : 'text-red-500'
-                  : 'text-gray-400'
+                !selectedProject || !selectedDevice
+                  ? 'text-gray-300 dark:text-gray-600'
+                  : file 
+                    ? isFilenameValid 
+                      ? 'text-green-500' 
+                      : 'text-red-500'
+                    : 'text-gray-400'
               }`} />
-              {file ? (
+              {!selectedProject || !selectedDevice ? (
+                <div className="text-center">
+                  <span className="text-gray-400 dark:text-gray-500 font-medium text-base">Select project and device first</span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500 mt-1 block">Project and device required to upload</span>
+                </div>
+              ) : file ? (
                 <div className="text-center">
                   <span className={`font-medium text-base ${
                     isFilenameValid 
@@ -118,6 +136,7 @@ const UploadFirmwareModal = ({
                 className="hidden"
                 ref={fileInputRef}
                 onChange={handleFileChange}
+                disabled={!selectedProject || !selectedDevice}
               />
             </div>
           </div>
@@ -147,27 +166,6 @@ const UploadFirmwareModal = ({
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Version</label>
-                <input
-                  type="text"
-                  className="w-full h-12 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-400 focus:outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base"
-                  placeholder="e.g., v1.2.4"
-                  value={version}
-                  onChange={e => setVersion(e.target.value)}
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
-                <input
-                  type="text"
-                  className="w-full h-12 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-400 focus:outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base"
-                  placeholder="Brief description of changes"
-                  value={description}
-                  onChange={e => setDescription(e.target.value)}
-                />
-              </div>
-              <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Device</label>
                 <Select
                   options={filteredDeviceOptions}
@@ -188,6 +186,27 @@ const UploadFirmwareModal = ({
                   }}
                   required
                   isDisabled={!selectedProject}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Version</label>
+                <input
+                  type="text"
+                  className="w-full h-12 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-400 focus:outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base"
+                  placeholder="e.g., v1.2.4"
+                  value={version}
+                  onChange={e => setVersion(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
+                <input
+                  type="text"
+                  className="w-full h-12 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-400 focus:outline-none bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base"
+                  placeholder="Brief description of changes"
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
                 />
               </div>
             </div>

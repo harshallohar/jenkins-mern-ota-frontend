@@ -1,1127 +1,398 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import React, { useEffect, useMemo, useState } from 'react';
 import Select from 'react-select';
-import { CheckCircle, XCircle, Clock, Download, Activity, Smartphone, HardDrive, RefreshCw } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { RefreshCw, Download as DownloadIcon, CheckCircle, XCircle, CircleSlash } from 'lucide-react';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
 import { BACKEND_BASE_URL } from '../utils/api';
-import RecentActivities from '../components/RecentActivities';
+import './react-select-tailwind.css';
 
 const DEVICES_API = `${BACKEND_BASE_URL}/devices`;
-const FIRMWARE_API = `${BACKEND_BASE_URL}/firmware/firmwares-details`;
-const OTA_API = `${BACKEND_BASE_URL}/ota-updates`;
 const PROJECTS_API = `${BACKEND_BASE_URL}/projects`;
-const DASHBOARD_STATS_API = `${BACKEND_BASE_URL}/ota-updates/dashboard-esp-stats`;
-const DAILY_STATS_API = `${BACKEND_BASE_URL}/ota-updates/daily-device-stats`;
-const WEEKLY_STATS_API = `${BACKEND_BASE_URL}/ota-updates/weekly-device-stats`;
+const DAILY_UNIQUE_API = `${BACKEND_BASE_URL}/ota-updates/daily-unique-stats`;
 
-const Dashboard = () => {
-  const [timeRange, setTimeRange] = useState('7d');
-  const [devices, setDevices] = useState([]);
-  const [firmwares, setFirmwares] = useState([]);
-  const [otaUpdates, setOtaUpdates] = useState([]);
-  const [selectedDevice, setSelectedDevice] = useState(null);
+export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [projects, setProjects] = useState([]);
+  const [devices, setDevices] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
-  
-  // New state for ESP-level statistics
-  const [espStats, setEspStats] = useState(null);
-  const [dailyStats, setDailyStats] = useState([]);
-  const [weeklyStats, setWeeklyStats] = useState([]);
-  const [statsLoading, setStatsLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  const [selectedDevice, setSelectedDevice] = useState(null);
+  const [range, setRange] = useState('7'); // 7, 30, 90, custom
+  const [customMode, setCustomMode] = useState(false);
+  const [startDateInput, setStartDateInput] = useState('');
+  const [endDateInput, setEndDateInput] = useState('');
+  const [data, setData] = useState([]);
+  const totals = useMemo(() => {
+    return data.reduce((acc, d) => ({
+      success: acc.success + (d.success || 0),
+      failure: acc.failure + (d.failure || 0),
+      total: acc.total + (d.total || 0)
+    }), { success: 0, failure: 0, total: 0 });
+  }, [data]);
+  const pieData = useMemo(() => ([
+    { name: 'Success', value: totals.success, color: '#16a34a' },
+    { name: 'Failure', value: totals.failure, color: '#dc2626' },
+  ]), [totals]);
 
-  // Detect dark mode for recharts and react-select
-  const [isDark, setIsDark] = useState(false);
+  // Load projects and devices
   useEffect(() => {
-    const checkDark = () => setIsDark(document.documentElement.classList.contains('dark'));
-    checkDark();
-    window.addEventListener('storage', checkDark);
-    window.addEventListener('DOMContentLoaded', checkDark);
-    return () => {
-      window.removeEventListener('storage', checkDark);
-      window.removeEventListener('DOMContentLoaded', checkDark);
-    };
-  }, []);
-
-  // Fetch all data
-  useEffect(() => {
-    const fetchAll = async () => {
-      setLoading(true);
-      setError('');
+    const fetchMeta = async () => {
       try {
         const token = localStorage.getItem('authToken');
-        const [devRes, fwRes, otaRes] = await Promise.all([
-          fetch(DEVICES_API, { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(FIRMWARE_API, { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(OTA_API, { headers: { Authorization: `Bearer ${token}` } })
+        const [pRes, dRes] = await Promise.all([
+          fetch(PROJECTS_API, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(DEVICES_API, { headers: { Authorization: `Bearer ${token}` } })
         ]);
-        if (devRes.status === 401 || fwRes.status === 401 || otaRes.status === 401) {
-          localStorage.removeItem('authToken');
-          localStorage.removeItem('user');
-          window.location.href = '/login';
-          return;
-        }
-        const devData = await devRes.json();
-        setDevices(Array.isArray(devData) ? devData : []);
-        const fwData = await fwRes.json();
-        setFirmwares(Array.isArray(fwData) ? fwData : []);
-        const otaData = await otaRes.json();
-        setOtaUpdates(Array.isArray(otaData) ? otaData : []);
-      } catch (err) {
-        setError('Failed to fetch dashboard data');
+        const [pData, dData] = await Promise.all([pRes.json(), dRes.json()]);
+        setProjects(Array.isArray(pData) ? pData : []);
+        setDevices(Array.isArray(dData) ? dData : []);
+      } catch (e) {
+        setProjects([]);
+        setDevices([]);
       }
-      setLoading(false);
     };
-    fetchAll();
+    fetchMeta();
   }, []);
 
-  // Fetch projects
+  // Auto-select default project (first) after load
   useEffect(() => {
-    const fetchProjects = async () => {
-      try {
-        const token = localStorage.getItem('authToken');
-        const res = await fetch(PROJECTS_API, { headers: { Authorization: `Bearer ${token}` } });
-        const data = await res.json();
-        setProjects(Array.isArray(data) ? data : []);
-      } catch {}
-    };
-    fetchProjects();
-  }, []);
+    if (!selectedProject && projects.length > 0) {
+      const first = projects[0];
+      setSelectedProject({ value: first._id, label: first.projectName });
+    }
+  }, [projects, selectedProject]);
 
-  // Refresh all dashboard data
-  const refreshDashboard = async () => {
-    setRefreshing(true);
+  // Auto-select first device under selected project
+  useEffect(() => {
+    if (!selectedProject || devices.length === 0) return;
+    const projectDevices = devices.filter(d => d.project === selectedProject.value);
+    if (projectDevices.length === 0) {
+      setSelectedDevice(null);
+      return;
+    }
+    // If current selected device is not part of this project, or not set, pick first
+    const isCurrentValid = selectedDevice && projectDevices.some(d => d.deviceId === selectedDevice.value);
+    if (!isCurrentValid) {
+      const d0 = projectDevices[0];
+      setSelectedDevice({ value: d0.deviceId, label: `${d0.name} (${d0.deviceId})` });
+    }
+  }, [selectedProject, devices]);
+
+  const projectOptions = useMemo(() => projects.map(p => ({ value: p._id, label: p.projectName })), [projects]);
+  const deviceOptions = useMemo(() => {
+    if (!selectedProject) return [];
+    return devices
+      .filter(d => d.project === selectedProject.value)
+      .map(d => ({ value: d.deviceId, label: `${d.name} (${d.deviceId})` }));
+  }, [devices, selectedProject]);
+
+  const computeDateRange = () => {
+    if (customMode && startDateInput && endDateInput) {
+      const s = new Date(startDateInput);
+      const e = new Date(endDateInput);
+      const start = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate(), 0, 0, 0, 0));
+      const end = new Date(Date.UTC(e.getUTCFullYear(), e.getUTCMonth(), e.getUTCDate(), 23, 59, 59, 999));
+      return { start, end };
+    }
+  const today = new Date();
+    const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999));
+    const days = parseInt(range, 10) || 7;
+    const startBase = new Date(end);
+    startBase.setUTCDate(startBase.getUTCDate() - (days - 1));
+    const start = new Date(Date.UTC(startBase.getUTCFullYear(), startBase.getUTCMonth(), startBase.getUTCDate(), 0, 0, 0, 0));
+    return { start, end };
+  };
+
+  const fetchData = async () => {
+    setLoading(true);
+    setError('');
     try {
-      // Fetch all data again
+      const { start, end } = computeDateRange();
+      const params = new URLSearchParams({ startDate: start.toISOString(), endDate: end.toISOString() });
+      if (selectedProject) params.set('projectId', selectedProject.value);
+      if (selectedDevice) params.set('deviceId', selectedDevice.value);
+      const res = await fetch(`${DAILY_UNIQUE_API}?${params.toString()}`);
+      if (!res.ok) throw new Error('Failed to load dashboard data');
+      const json = await res.json();
+      setData(Array.isArray(json?.daily) ? json.daily : []);
+    } catch (e) {
+      setError(e.message || 'Error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProject, selectedDevice, range, customMode, startDateInput, endDateInput]);
+
+  const handleQuickRange = (val) => {
+    setRange(val);
+    setCustomMode(false);
+  };
+
+  const handleUseCustom = () => {
+    setCustomMode(true);
+    setRange('custom');
+  };
+
+  const exportCSV = async () => {
+    if (!data || data.length === 0) return;
+    
+    setLoading(true);
+    try {
+      // Fetch detailed OTA attempts data for the selected date range and filters
+      const { start, end } = computeDateRange();
+      const params = new URLSearchParams({ startDate: start.toISOString(), endDate: end.toISOString() });
+      if (selectedProject) params.set('projectId', selectedProject.value);
+      if (selectedDevice) params.set('deviceId', selectedDevice.value);
+      
       const token = localStorage.getItem('authToken');
-      const [devRes, fwRes, otaRes, projectsRes] = await Promise.all([
-        fetch(DEVICES_API, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(FIRMWARE_API, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(OTA_API, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(PROJECTS_API, { headers: { Authorization: `Bearer ${token}` } })
+      const attemptsRes = await fetch(`${BACKEND_BASE_URL}/ota-updates/attempts?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (!attemptsRes.ok) throw new Error('Failed to fetch detailed data');
+      const attemptsData = await attemptsRes.json();
+      
+      // Create detailed report headers
+      const headers = [
+        'Date',
+        'PIC ID',
+        'Device ID',
+        'Device Name',
+        'Project',
+        'Previous Version',
+        'Updated Version',
+        'Status',
+        'Status Message',
+        'Badge',
+        'Attempt Number',
+        'Timestamp'
+      ];
+      
+      // Create detailed rows
+      const rows = attemptsData.map(attempt => [
+        new Date(attempt.date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' }),
+        `"${attempt.pic_id}"`, // Wrap PIC ID in quotes to force text format
+        attempt.deviceId,
+        // Get device name from devices array
+        devices.find(d => d.deviceId === attempt.deviceId)?.name || 'Unknown',
+        // Get project name from projects array
+        projects.find(p => p._id === devices.find(d => d.deviceId === attempt.deviceId)?.project)?.projectName || 'Unassigned',
+        attempt.previousVersion,
+        attempt.updatedVersion,
+        attempt.status,
+        attempt.statusMessage || '',
+        attempt.badge,
+        attempt.attemptNumber,
+        new Date(attempt.date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' }) + ' ' + new Date(attempt.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
       ]);
       
-      if (devRes.status === 401 || fwRes.status === 401 || otaRes.status === 401 || projectsRes.status === 401) {
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('user');
-        window.location.href = '/login';
-        return;
-      }
+      // Add summary section at the top
+      const summaryRows = [
+        ['Dashboard Export Summary'],
+        [''],
+        ['Export Date', new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' })],
+        ['Export Time', new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })],
+        ['Date Range', `${start.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' })} to ${end.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' })}`],
+        ['Project', selectedProject ? selectedProject.label : 'All Projects'],
+        ['Device', selectedDevice ? selectedDevice.label : 'All Devices'],
+        ['Total Attempts', attemptsData.length],
+        ['Success Count', attemptsData.filter(a => a.badge === 'success').length],
+        ['Failure Count', attemptsData.filter(a => a.badge === 'failure').length],
+        ['Other Count', attemptsData.filter(a => a.badge === 'other').length],
+        [''],
+        ['IMPORTANT: If you see "###" in Excel, double-click the column header to auto-resize the column width'],
+        ['NOTE: PIC IDs are wrapped in quotes to preserve their full length in Excel'],
+        [''],
+        ['Detailed Attempts Report'],
+        [''],
+        headers
+      ];
       
-      const devData = await devRes.json();
-      setDevices(Array.isArray(devData) ? devData : []);
-      const fwData = await fwRes.json();
-      setFirmwares(Array.isArray(fwData) ? fwData : []);
-      const otaData = await otaRes.json();
-      setOtaUpdates(Array.isArray(otaData) ? otaData : []);
-      const projectsData = await projectsRes.json();
-      setProjects(Array.isArray(projectsData) ? projectsData : []);
+      const csv = [...summaryRows, ...rows].map(row => 
+        row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
+      ).join('\n');
       
-      // Refresh ESP statistics
-      await fetchESPStats();
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `dashboard_detailed_report_${start.toISOString().split('T')[0]}_to_${end.toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
       
-    } catch (err) {
-      setError('Failed to refresh dashboard data');
-    }
-    setRefreshing(false);
-  };
-
-  // Fetch ESP-level statistics
-  const fetchESPStats = async () => {
-    setStatsLoading(true);
-    try {
-      const startDate = getStartDate();
-      const endDate = new Date(Date.UTC(
-        utcNow.getUTCFullYear(),
-        utcNow.getUTCMonth(),
-        utcNow.getUTCDate(),
-        23, 59, 59, 999
-      ));
-      
-      const projectId = selectedProject?.value;
-      
-      // Fetch dashboard ESP stats
-      const dashboardRes = await fetch(
-        `${DASHBOARD_STATS_API}?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}${projectId ? `&projectId=${projectId}` : ''}`
-      );
-      const dashboardData = await dashboardRes.json();
-      setEspStats(dashboardData);
-      
-      // Fetch daily stats for charts
-      const dailyRes = await fetch(
-        `${DAILY_STATS_API}?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}${projectId ? `&projectId=${projectId}` : ''}`
-      );
-      const dailyData = await dailyRes.json();
-      setDailyStats(dailyData);
-      
-      // Fetch weekly stats for charts (if time range is 30d or 90d)
-      if (timeRange === '30d' || timeRange === '90d') {
-        const weeklyRes = await fetch(
-          `${WEEKLY_STATS_API}?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}${projectId ? `&projectId=${projectId}` : ''}`
-        );
-        const weeklyData = await weeklyRes.json();
-        setWeeklyStats(weeklyData);
-      }
-    } catch (err) {
-      console.error('Error fetching device stats:', err);
-      setError('Failed to fetch device statistics');
-    }
-    setStatsLoading(false);
-  };
-
-  // Fetch ESP stats when time range or project changes
-  useEffect(() => {
-    fetchESPStats();
-  }, [timeRange, selectedProject]);
-
-  // Defensive: if devices is not an array, show error
-  if (!Array.isArray(devices)) {
-    return <div className="p-8 text-center text-red-500 font-semibold">Error loading devices.</div>;
-  }
-
-  // Filter devices by selected project
-  const filteredDevices = selectedProject
-    ? devices.filter(d => d.project === selectedProject.value)
-    : devices;
-  const deviceOptions = selectedProject 
-    ? filteredDevices.map(d => ({ 
-        value: d.deviceId, // Use only device ID as value
-        label: `${d.name} (${d.deviceId})` // Keep full label for display
-      }))
-    : [];
-
-  // Helper function to normalize status (for backward compatibility)
-  const normalizeStatus = (status, normalizedStatus) => {
-    // If normalizedStatus is available from backend, use it
-    if (normalizedStatus) {
-      return normalizedStatus;
-    }
-    
-    // Fallback normalization for legacy data or when normalizedStatus is not available
-    if (!status) return 'Failed';
-    const statusLower = status.toLowerCase();
-    if (statusLower.includes('success') || statusLower.includes('programming successfull')) {
-      return 'Success';
-    } else if (statusLower.includes('fail') || 
-               statusLower.includes('unsuccessful') ||
-               statusLower.includes('failed to download') ||
-               statusLower.includes('error')) {
-      return 'Failed';
-    } else {
-      return 'In Progress';
-    }
-  };
-
-  // Debug: Log status values to see what we're working with
-  useEffect(() => {
-    if (otaUpdates.length > 0) {
-      console.log('Dashboard - OTA Updates data:', otaUpdates.slice(0, 5).map(u => ({ 
-        deviceId: u.deviceId,
-        status: u.status, 
-        normalizedStatus: u.normalizedStatus,
-        normalized: normalizeStatus(u.status, u.normalizedStatus),
-        date: u.date,
-        pic_id: u.pic_id
-      })));
-      console.log('Dashboard - Total OTA updates:', otaUpdates.length);
-    }
-    
-    if (devices.length > 0) {
-      console.log('Dashboard - Devices data:', devices.slice(0, 5).map(d => ({
-        deviceId: d.deviceId,
-        name: d.name,
-        project: d.project
-      })));
-      console.log('Dashboard - Total devices:', devices.length);
-    }
-    
-    if (projects.length > 0) {
-      console.log('Dashboard - Projects data:', projects.map(p => ({
-        _id: p._id,
-        projectName: p.projectName
-      })));
-    }
-  }, [otaUpdates, devices, projects]);
-
-  // Use UTC date to avoid timezone issues
-  const now = new Date();
-  // Get today's date in UTC by using the current date, not the local timezone's UTC date
-  const today = new Date();
-  const utcNow = new Date(Date.UTC(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate(),
-    today.getHours(),
-    today.getMinutes(),
-    today.getSeconds()
-  ));
-  
-  // FORCE REFRESH - This will show if the code is being updated
-  console.log('🔥 DASHBOARD COMPONENT RELOADED - UTC NOW:', utcNow.toISOString());
-  console.log('🔥 TODAY IS JULY 30, 2025 - UTC DATE:', utcNow.getUTCDate());
-  
-  // Alert to force cache clear
-  if (typeof window !== 'undefined') {
-    console.log('🔥 BROWSER DETECTED - CLEARING CACHE');
-    // Uncomment the next line if you want to see an alert
-    // alert('Dashboard updated! Please check console for week calculations.');
-  }
-  
-  const getStartDate = () => {
-    if (timeRange === '7d') {
-      // 7 days ago from today (UTC)
-      const startDate = new Date(Date.UTC(
-        utcNow.getUTCFullYear(),
-        utcNow.getUTCMonth(),
-        utcNow.getUTCDate() - 6
-      ));
-      console.log('7d start date (UTC):', startDate.toISOString());
-      return startDate;
-    }
-    if (timeRange === '30d') {
-      // 30 days ago from today (UTC)
-      const startDate = new Date(Date.UTC(
-        utcNow.getUTCFullYear(),
-        utcNow.getUTCMonth(),
-        utcNow.getUTCDate() - 29
-      ));
-      console.log('30d start date (UTC):', startDate.toISOString());
-      return startDate;
-    }
-    if (timeRange === '90d') {
-      // 90 days ago from today (UTC)
-      const startDate = new Date(Date.UTC(
-        utcNow.getUTCFullYear(),
-        utcNow.getUTCMonth(),
-        utcNow.getUTCDate() - 89
-      ));
-      console.log('90d start date (UTC):', startDate.toISOString());
-      return startDate;
-    }
-    // Default fallback
-    const fallbackDate = new Date(0);
-    console.log('Using default fallback date:', fallbackDate.toISOString());
-    return fallbackDate;
-  };
-  const startDate = getStartDate();
-  
-  console.log('=== START DATE DEBUG ===');
-  console.log('Time Range:', timeRange);
-  console.log('Calculated Start Date:', startDate.toISOString());
-  console.log('Current Date (Local):', now.toISOString());
-  console.log('Current Date (UTC):', utcNow.toISOString());
-  console.log('Sample OTA Update Dates:', otaUpdates.slice(0, 3).map(u => ({
-    deviceId: u.deviceId,
-    date: u.date,
-    createdAt: u.createdAt,
-    updatedAt: u.updatedAt,
-    parsedDate: new Date(u.date || u.createdAt || u.updatedAt).toISOString()
-  })));
-  
-  // Debug: Show what the 7-day range should be
-  if (timeRange === '7d') {
-    const debugDays = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(Date.UTC(
-        utcNow.getUTCFullYear(),
-        utcNow.getUTCMonth(),
-        utcNow.getUTCDate() - (6 - i)  // 6 days ago (i=0) to today (i=6)
-      ));
-      return d;
-    });
-    console.log('=== 7-DAY RANGE DEBUG ===');
-    console.log('Expected 7-day range:', debugDays.map(d => ({
-      date: d.toISOString().slice(0, 10),
-      day: d.toLocaleDateString(undefined, { weekday: 'short' }),
-      fullDay: d.toLocaleDateString(undefined, { weekday: 'long' })
-    })));
-    console.log('Start date should be:', debugDays[0].toISOString());
-    console.log('End date should be:', debugDays[6].toISOString());
-    console.log('Today is July 30, 2025, so range should be July 24-30');
-    console.log('Current UTC date:', utcNow.toISOString().slice(0, 10));
-  }
-
-  const filteredUpdates = useMemo(() => {
-    const filtered = otaUpdates.filter(u => {
-      // Handle date parsing
-      const updateDate = u.date || u.createdAt || u.updatedAt;
-      if (!updateDate) {
-        console.log('No date found for update:', u);
-        return false;
-      }
-      
-      const date = new Date(updateDate);
-      if (isNaN(date.getTime())) {
-        console.log('Invalid date for update:', u);
-        return false;
-      }
-      
-      // Now use the custom date range that includes July 29, 2025
-      // Re-enable date filtering - include dates >= startDate (inclusive)
-      if (date < startDate) {
-        console.log('Date before start date:', {
-          updateDate: updateDate,
-          parsedDate: date.toISOString(),
-          startDate: startDate.toISOString(),
-          isBeforeStart: date < startDate
-        });
-        return false;
-      }
-      
-      // Check if date is within reasonable range (not too far in the future)
-      // Use end of today (23:59:59) to include all of today's data
-      const endDate = new Date(Date.UTC(
-        utcNow.getUTCFullYear(),
-        utcNow.getUTCMonth(),
-        utcNow.getUTCDate(),
-        23, 59, 59, 999
-      ));
-      
-      if (date > endDate) {
-        console.log('Date too far in future:', {
-          updateDate: updateDate,
-          parsedDate: date.toISOString(),
-          endDate: endDate.toISOString(),
-          isAfterEnd: date > endDate
-        });
-        return false;
-      }
-      
-      console.log('Date filtering debug:', {
-        updateDate: updateDate,
-        parsedDate: date.toISOString(),
-        startDate: startDate.toISOString(),
-        endDate: endDate.toISOString(),
-        isInRange: date >= startDate && date <= endDate,
-        timeRange
-      });
-      
-      // Filter by project (all devices in the project)
-      if (selectedProject) {
-        const projectDevices = devices.filter(d => d.project === selectedProject.value);
-        const projectDeviceIds = projectDevices.map(d => d.deviceId);
-        
-        console.log('=== PROJECT FILTERING DEBUG ===');
-        console.log('Selected Project ID:', selectedProject.value);
-        console.log('All Devices:', devices.map(d => ({ 
-          deviceId: d.deviceId, 
-          name: d.name, 
-          project: d.project,
-          projectMatches: d.project === selectedProject.value
-        })));
-        console.log('Project Devices:', projectDevices.map(d => ({ deviceId: d.deviceId, name: d.name })));
-        console.log('Project Device IDs:', projectDeviceIds);
-        console.log('Current Update Device ID:', u.deviceId);
-        console.log('Is Device in Project:', projectDeviceIds.includes(u.deviceId));
-        
-        if (!projectDeviceIds.includes(u.deviceId)) {
-          console.log('❌ Device not in project:', u.deviceId, 'Project devices:', projectDeviceIds);
-          return false;
-        } else {
-          console.log('✅ Device found in project:', u.deviceId);
-        }
-      }
-      
-      // Filter by specific device if selected
-      if (selectedDevice) {
-        // selectedDevice.value should now be just the device ID (e.g., "0x009CADF19EF0")
-        const deviceIdToMatch = selectedDevice.value;
-        
-        // Handle device ID format mismatches (with/without 0x prefix)
-        const deviceIdWithoutPrefix = deviceIdToMatch.replace(/^0x/i, '');
-        const updateDeviceId = u.deviceId;
-        const updateDeviceIdWithoutPrefix = updateDeviceId.replace(/^0x/i, '');
-        
-        const matches = u.deviceId === deviceIdToMatch || 
-               updateDeviceIdWithoutPrefix === deviceIdWithoutPrefix ||
-               u.deviceId === deviceIdWithoutPrefix ||
-               updateDeviceIdWithoutPrefix === deviceIdToMatch;
-        
-        console.log('Device filtering debug:', {
-          selectedDeviceValue: deviceIdToMatch,
-          updateDeviceId: u.deviceId,
-          deviceIdWithoutPrefix,
-          updateDeviceIdWithoutPrefix,
-          matches
-        });
-        
-        if (!matches) {
-          console.log('Device ID mismatch:', {
-            selected: deviceIdToMatch,
-            update: u.deviceId,
-            selectedWithoutPrefix: deviceIdWithoutPrefix,
-            updateWithoutPrefix: updateDeviceIdWithoutPrefix
-          });
-          return false;
-        }
-        
-        return true;
-      }
-      return true;
-    });
-    
-    console.log('Filtered Updates Debug:', {
-      totalUpdates: otaUpdates.length,
-      filteredCount: filtered.length,
-      selectedProject: selectedProject?.label,
-      selectedDevice: selectedDevice?.label,
-      timeRange,
-      startDate: isNaN(startDate.getTime()) ? 'Invalid Date' : startDate.toISOString(),
-      sampleFiltered: filtered.slice(0, 3).map(u => ({
-        deviceId: u.deviceId,
-        status: u.status,
-        normalizedStatus: u.normalizedStatus,
-        date: u.date
-      }))
-    });
-    
-    return filtered;
-  }, [otaUpdates, startDate, selectedDevice, selectedProject, devices]);
-
-  // Stats - using ESP-level statistics
-  const totalESPs = espStats?.totalESPs || filteredDevices.length;
-  const totalFirmwares = selectedDevice
-    ? firmwares.filter(fw => {
-        // Handle device ID format mismatches (with/without 0x prefix)
-        const deviceIdToMatch = selectedDevice.value;
-        const deviceIdWithoutPrefix = deviceIdToMatch.replace(/^0x/i, '');
-        const firmwareDeviceId = fw.esp_id;
-        const firmwareDeviceIdWithoutPrefix = firmwareDeviceId.replace(/^0x/i, '');
-        
-        return fw.esp_id === deviceIdToMatch || 
-               firmwareDeviceIdWithoutPrefix === deviceIdWithoutPrefix ||
-               fw.esp_id === deviceIdWithoutPrefix ||
-               firmwareDeviceIdWithoutPrefix === deviceIdToMatch;
-      }).length
-    : 0;
-  
-  // Total PIC experiences (counting each PIC experience separately)
-  const totalSuccess = espStats?.totalPicsWithSuccess || 0;
-  const totalFailed = espStats?.totalPicsWithFailure || 0;
-
-  // Pie chart data - using total PIC experiences
-  const pieData = [
-    { name: 'Total PIC Success Experiences', value: totalSuccess, color: '#10B981' },
-    { name: 'Total PIC Failure Experiences', value: totalFailed, color: '#EF4444' },
-  ].filter(item => item.value > 0); // Only show categories with data
-
-  // Bar chart data - using device-level statistics
-  const barData = useMemo(() => {
-    console.log('=== BAR CHART DATA GENERATION ===');
-    console.log('Time Range:', timeRange);
-    console.log('Selected Project:', selectedProject?.label);
-    console.log('Selected Device:', selectedDevice?.label);
-    
-    if (timeRange === '7d') {
-      // Use daily stats for 7-day view
-      if (dailyStats.length === 0) {
-        console.log('No daily stats found, returning empty data');
-        return [];
-      }
-      
-      const result = dailyStats.map(day => ({
-        name: day.dayName,
-        date: day.date,
-        fullDate: day.fullDate,
-        'Total PIC Success Experiences': day.devicesWithSuccess,
-        'Total PIC Failure Experiences': day.devicesWithFailure,
-      }));
-      
-      console.log('Final 7d bar data:', result);
-      return result;
-    } else if (timeRange === '30d') {
-      // Use weekly stats for 30-day view
-      if (weeklyStats.length === 0) {
-        console.log('No weekly stats found, returning empty data');
-        return [];
-      }
-      
-      const result = weeklyStats.map(week => ({
-        name: week.week,
-        date: week.dateRange,
-        fullDate: week.dateRange,
-        'Total PIC Success Experiences': week.devicesWithSuccess,
-        'Total PIC Failure Experiences': week.devicesWithFailure,
-      }));
-      
-      console.log('Final 30d bar data:', result);
-      return result;
-    } else if (timeRange === '90d') {
-      // Use weekly stats for 90-day view (grouped by month)
-      if (weeklyStats.length === 0) {
-        console.log('No weekly stats found, returning empty data');
-        return [];
-      }
-      
-      // Group weekly stats by month
-      const monthlyStats = {};
-      weeklyStats.forEach(week => {
-        const monthKey = week.dateRange.split(' - ')[0].split(' ')[0]; // Get month name
-        if (!monthlyStats[monthKey]) {
-          monthlyStats[monthKey] = {
-            devicesWithSuccess: 0,
-            devicesWithFailure: 0,
-            totalDevices: 0
-          };
-        }
-        monthlyStats[monthKey].devicesWithSuccess += week.devicesWithSuccess;
-        monthlyStats[monthKey].devicesWithFailure += week.devicesWithFailure;
-        monthlyStats[monthKey].totalDevices += week.totalDevices;
-      });
-      
-      const result = Object.entries(monthlyStats).map(([month, stats]) => ({
-        name: month,
-        date: month,
-        fullDate: month,
-        'Total PIC Success Experiences': stats.devicesWithSuccess,
-        'Total PIC Failure Experiences': stats.devicesWithFailure,
-      }));
-      
-      console.log('Final 90d bar data:', result);
-      return result;
-    }
-    return [];
-  }, [dailyStats, weeklyStats, timeRange, selectedProject, selectedDevice]);
-
-
-
-  // Excel Download Functions
-  const downloadStatsData = () => {
-    const statsData = [
-      {
-        Metric: 'Total Devices',
-        Value: totalDevices,
-        Change: '+0% from last period'
-      },
-      {
-        Metric: 'Total Firmwares Uploaded',
-        Value: totalFirmwares,
-        Change: '+0% from last period'
-      },
-      {
-        Metric: 'Total Success',
-        Value: totalSuccess,
-        Change: '+0% from last period'
-      },
-      {
-        Metric: 'Total Failures',
-        Value: totalFailed,
-        Change: '+0% from last period'
-      }
-    ];
-
-    const fileName = `Dashboard_Stats_${new Date().toISOString().split('T')[0]}.xlsx`;
-    const ws = XLSX.utils.json_to_sheet(statsData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Dashboard Stats');
-    XLSX.writeFile(wb, fileName);
-
-    // Log activity
-    logExportActivity('Dashboard Stats', fileName);
-  };
-
-  const downloadBarChartData = () => {
-    const chartData = barData.map(item => ({
-      Period: item.name,
-      Success: item.Success,
-      Failed: item.Failed,
-      Total: item.Success + item.Failed,
-      Date_Range: item.fullDate || item.date || 'N/A'
-    }));
-
-    const fileName = `Bar_Chart_Data_${timeRange}_${new Date().toISOString().split('T')[0]}.xlsx`;
-    const ws = XLSX.utils.json_to_sheet(chartData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Bar Chart Data');
-    XLSX.writeFile(wb, fileName);
-
-    // Log activity
-    logExportActivity('Bar Chart Data', fileName);
-  };
-
-  const downloadPieChartData = () => {
-    const chartData = pieData.map(item => ({
-      Status: item.name,
-      Count: item.value,
-      Percentage: `${((item.value / (totalSuccess + totalFailed)) * 100).toFixed(1)}%`
-    }));
-
-    const fileName = `Pie_Chart_Data_${new Date().toISOString().split('T')[0]}.xlsx`;
-    const ws = XLSX.utils.json_to_sheet(chartData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Pie Chart Data');
-    XLSX.writeFile(wb, fileName);
-
-    // Log activity
-    logExportActivity('Pie Chart Data', fileName);
-  };
-
-  const downloadFilteredUpdates = () => {
-    const updatesData = filteredUpdates.map(update => ({
-      Device_ID: update.deviceId,
-      Status: update.status,
-      Normalized_Status: update.normalizedStatus,
-      Date: new Date(update.date).toLocaleDateString(),
-      PIC_ID: update.pic_id || 'N/A',
-      Previous_Version: update.previousVersion || 'N/A',
-      Updated_Version: update.updatedVersion || 'N/A'
-    }));
-
-    const fileName = `OTA_Updates_${timeRange}_${new Date().toISOString().split('T')[0]}.xlsx`;
-    const ws = XLSX.utils.json_to_sheet(updatesData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'OTA Updates');
-    XLSX.writeFile(wb, fileName);
-
-    // Log activity
-    logExportActivity('OTA Updates', fileName);
-  };
-
-  // Log export activity
-  const logExportActivity = async (exportType, fileName) => {
-    try {
-      const token = localStorage.getItem('authToken');
-      const user = JSON.parse(localStorage.getItem('user'));
-      
-      await fetch(`${BACKEND_BASE_URL}/recent-activities/create`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          activityType: 'EXPORT_DATA',
-          title: 'Data Exported',
-          description: `${exportType} data exported to ${fileName}`,
-          severity: 'info',
-          details: {
-            exportType,
-            fileName,
-            userId: user?._id
-          }
-        })
-      });
     } catch (error) {
-      console.error('Error logging export activity:', error);
+      console.error('Export failed:', error);
+      alert('Failed to export detailed report. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
-
-
-  // Card icon backgrounds
-  const iconBg = {
-    blue: 'bg-blue-100 text-blue-600',
-    purple: 'bg-purple-100 text-purple-600',
-    green: 'bg-green-100 text-green-600',
-    red: 'bg-red-100 text-red-600',
-  };
-
-  // Card config for consistent style
-  const cardStats = [
-    {
-      label: 'Total ESPs',
-      valueKey: 'totalESPs',
-      icon: Smartphone,
-      iconBg: iconBg.blue,
-      sub: 'ESPs in selected project',
-    },
-    {
-              label: 'Total PIC Success Experiences',
-      valueKey: 'totalSuccess',
-      icon: CheckCircle,
-      iconBg: iconBg.green,
-      sub: 'Total PIC experiences with success',
-    },
-    {
-      label: 'ESPs with PIC Failure',
-      valueKey: 'totalFailed',
-      icon: XCircle,
-      iconBg: iconBg.red,
-      sub: 'Total PIC experiences with failures',
-    },
-
-  ];
-
-  // Custom tooltip for bar chart
-  const CustomBarTooltip = ({ active, payload, label }) => {
-    if (active && payload && payload.length) {
-      // Get the data point to access date information
-      const dataPoint = payload[0]?.payload;
-      const date = dataPoint?.fullDate || dataPoint?.date || label;
-      
-      return (
-        <div className="rounded-lg bg-white dark:bg-gray-800 shadow px-4 py-2 border border-gray-200 dark:border-gray-700">
-          <div className="font-semibold text-gray-900 dark:text-white mb-1">{date}</div>
-          <div className="flex flex-col gap-1">
-            <span className="text-green-600 dark:text-green-400">Total PIC Success Experiences: <b>{payload.find(p => p.dataKey === 'Total PIC Success Experiences')?.value ?? 0}</b></span>
-            <span className="text-red-600 dark:text-red-400">Total PIC Failure Experiences: <b>{payload.find(p => p.dataKey === 'Total PIC Failure Experiences')?.value ?? 0}</b></span>
-          </div>
-        </div>
-      );
-    }
-    return null;
-  };
-
-  // Custom legend for charts
-  const CustomLegend = ({ payload }) => (
-    <div className="flex flex-wrap gap-4 mt-4 text-xs justify-center">
-      {payload.map((entry) => (
-        <div key={entry.value} className="flex items-center gap-2 min-w-0">
-          <span className="inline-block w-3 h-3 rounded flex-shrink-0" style={{ background: entry.color }}></span>
-          <span 
-            className="whitespace-nowrap" 
-            style={{ color: isDark ? '#d1d5db' : '#374151' }}
-          >
-            {entry.value} ({entry.payload.value})
-          </span>
-        </div>
-      ))}
-    </div>
-  );
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Overview of your device management system
-          </p>
-        </div>
-        <div className="flex flex-col sm:flex-row gap-2 items-center">
+    <div className="p-4 md:p-6 space-y-6">
+      {/* Filter Bar */}
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-4 shadow-sm">
+        <div className="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
+          <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+            <div className="min-w-[220px]">
           <Select
-            className={`min-w-[220px]`}
-            classNamePrefix="react-select"
-            options={projects.map(p => ({ value: p._id, label: p.projectName }))}
+                classNamePrefix="react-select"
+                placeholder="Select Project"
+                options={projectOptions}
+                value={selectedProject}
+                onChange={(v) => { setSelectedProject(v); setSelectedDevice(null); }}
             isClearable
-            placeholder="Select project..."
-            value={selectedProject}
-            onChange={option => { setSelectedProject(option); setSelectedDevice(null); }}
-            styles={{
-              control: (base, state) => ({
-                ...base,
-                backgroundColor: isDark ? '#1f2937' : '#fff',
-                borderColor: isDark ? '#374151' : '#d1d5db',
-                color: isDark ? '#f3f4f6' : '#111827',
-                boxShadow: state.isFocused ? (isDark ? '0 0 0 1px #2563eb' : '0 0 0 1px #2563eb') : base.boxShadow,
-              }),
-              menu: (base) => ({
-                ...base,
-                backgroundColor: isDark ? '#1f2937' : '#fff',
-                color: isDark ? '#f3f4f6' : '#111827',
-              }),
-              singleValue: (base) => ({
-                ...base,
-                color: isDark ? '#f3f4f6' : '#111827',
-              }),
-              option: (base, state) => ({
-                ...base,
-                backgroundColor: state.isFocused
-                  ? (isDark ? '#374151' : '#f3f4f6')
-                  : (isDark ? '#1f2937' : '#fff'),
-                color: isDark ? '#f3f4f6' : '#111827',
-              }),
-              input: (base) => ({
-                ...base,
-                color: isDark ? '#f3f4f6' : '#111827',
-              }),
-              placeholder: (base) => ({
-                ...base,
-                color: isDark ? '#9ca3af' : '#6b7280',
-              }),
-              dropdownIndicator: (base) => ({
-                ...base,
-                color: isDark ? '#9ca3af' : '#6b7280',
-              }),
-              indicatorSeparator: (base) => ({
-                ...base,
-                backgroundColor: isDark ? '#374151' : '#d1d5db',
-              }),
-            }}
-          />
+              />
+            </div>
+            <div className="min-w-[260px]">
           <Select
-            className={`min-w-[220px]`}
-            classNamePrefix="react-select"
+                classNamePrefix="react-select"
+                placeholder="Select Device (optional)"
             options={deviceOptions}
-            isClearable
-            placeholder="Select device..."
             value={selectedDevice}
             onChange={setSelectedDevice}
-            styles={{
-              control: (base, state) => ({
-                ...base,
-                backgroundColor: isDark ? '#1f2937' : '#fff',
-                borderColor: isDark ? '#374151' : '#d1d5db',
-                color: isDark ? '#f3f4f6' : '#111827',
-                boxShadow: state.isFocused ? (isDark ? '0 0 0 1px #2563eb' : '0 0 0 1px #2563eb') : base.boxShadow,
-              }),
-              menu: (base) => ({
-                ...base,
-                backgroundColor: isDark ? '#1f2937' : '#fff',
-                color: isDark ? '#f3f4f6' : '#111827',
-              }),
-              singleValue: (base) => ({
-                ...base,
-                color: isDark ? '#f3f4f6' : '#111827',
-              }),
-              option: (base, state) => ({
-                ...base,
-                backgroundColor: state.isFocused
-                  ? (isDark ? '#374151' : '#f3f4f6')
-                  : (isDark ? '#1f2937' : '#fff'),
-                color: isDark ? '#f3f4f6' : '#111827',
-              }),
-              input: (base) => ({
-                ...base,
-                color: isDark ? '#f3f4f6' : '#111827',
-              }),
-              placeholder: (base) => ({
-                ...base,
-                color: isDark ? '#9ca3af' : '#6b7280',
-              }),
-              dropdownIndicator: (base) => ({
-                ...base,
-                color: isDark ? '#9ca3af' : '#6b7280',
-              }),
-              indicatorSeparator: (base) => ({
-                ...base,
-                backgroundColor: isDark ? '#374151' : '#d1d5db',
-              }),
-            }}
+                isClearable
             isDisabled={!selectedProject}
           />
-          <select
-            value={timeRange}
-            onChange={(e) => setTimeRange(e.target.value)}
-            className="block w-full sm:w-auto px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-          >
-            <option value="7d">Last 7 days</option>
-            <option value="30d">Last 30 days</option>
-            <option value="90d">Last 90 days</option>
-          </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => handleQuickRange('7')} className={`px-3 py-2 rounded-full text-sm ${!customMode && range==='7' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'}`}>7d</button>
+              <button onClick={() => handleQuickRange('30')} className={`px-3 py-2 rounded-full text-sm ${!customMode && range==='30' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'}`}>30d</button>
+              <button onClick={() => handleQuickRange('90')} className={`px-3 py-2 rounded-full text-sm ${!customMode && range==='90' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'}`}>90d</button>
+              <button onClick={handleUseCustom} className={`px-3 py-2 rounded-full text-sm ${customMode ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'}`}>Custom</button>
+            </div>
+            {customMode && (
+              <div className="flex items-center gap-2">
+                <input type="date" className="rounded border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 px-3 py-2" value={startDateInput} onChange={(e) => setStartDateInput(e.target.value)} />
+                <span className="text-gray-600 dark:text-gray-300">to</span>
+                <input type="date" className="rounded border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 px-3 py-2" value={endDateInput} onChange={(e) => setEndDateInput(e.target.value)} />
         </div>
+            )}
       </div>
-
-      {/* Stats Cards */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Key Metrics</h3>
           <div className="flex items-center gap-2">
             <button
-              onClick={refreshDashboard}
-              disabled={refreshing}
-              className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white text-sm rounded-lg transition-colors"
+              onClick={fetchData}
+              className="inline-flex items-center px-3 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm"
             >
-              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
+              <RefreshCw className="h-4 w-4 mr-2" /> Refresh
             </button>
             <button
-              onClick={downloadStatsData}
-              className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors"
+              onClick={exportCSV}
+              disabled={loading}
+              className="inline-flex items-center px-3 py-2 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Download className="h-4 w-4" />
-              Export Stats
+              <DownloadIcon className="h-4 w-4 mr-2" /> 
+              {loading ? 'Exporting...' : 'Export CSV'}
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {(!selectedDevice
-            ? cardStats.filter(stat => stat.valueKey === 'totalDevices')
-            : cardStats
-          ).map((stat, i) => {
-            const Icon = stat.icon;
-            const value = (() => {
-              if (stat.valueKey === 'totalESPs') return totalESPs;
-              if (stat.valueKey === 'totalSuccess') return totalSuccess;
-              if (stat.valueKey === 'totalFailed') return totalFailed;
-              return 0;
-            })();
-            return (
-              <div key={stat.label} className="bg-white dark:bg-gray-800 rounded-2xl shadow flex flex-col justify-between px-6 py-5 min-h-[120px]">
-                <div className="flex items-center justify-between w-full">
-                  <div>
-                    <div className="text-xs font-medium text-gray-500 mb-1">{stat.label}</div>
-                    <div className="text-2xl font-bold text-gray-900 mb-1 dark:text-white">{value}</div>
-                    <div className="text-xs text-gray-400">{stat.sub}</div>
-                  </div>
-                  <div className={`flex items-center justify-center w-12 h-12 rounded-full ${stat.iconBg} bg-opacity-60`}>
-                    <Icon className="h-6 w-6" />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </div>
 
-      {/* Recent Activities - Always visible */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow p-6">
-        <RecentActivities />
-      </div>
-
-      {/* Charts Section - Only show when both project and device are selected */}
-      {selectedProject && selectedDevice && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Device Activity Bar Chart */}
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow p-6 mb-8">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white">Device Activity</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Total PIC success/failure experiences over the last {timeRange === '7d' ? '7 days' : timeRange === '30d' ? '4 weeks' : '3 months'}
-                </p>
-              </div>
-              <button
-                onClick={downloadBarChartData}
-                className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg transition-colors"
-              >
-                <Download className="h-4 w-4" />
-                Export Chart
-              </button>
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <StatCard title="Total" value={totals.total} gradientFrom="from-blue-50" icon={CircleSlash} iconClass="text-blue-600" />
+        <StatCard title="Success" value={totals.success} gradientFrom="from-green-50" icon={CheckCircle} iconClass="text-green-600" valueClass="text-green-600" />
+        <StatCard title="Failure" value={totals.failure} gradientFrom="from-red-50" icon={XCircle} iconClass="text-red-600" valueClass="text-red-600" />
             </div>
-            <div className="bg-white dark:bg-gray-800 rounded-2xl p-4">
-              <ResponsiveContainer width="100%" height={340}>
-                <BarChart
-                  data={barData}
-                  barGap={8}
-                  barCategoryGap={20}
-                >
-                  <CartesianGrid stroke={isDark ? '#374151' : '#E5E7EB'} />
-                  <XAxis dataKey="name" stroke={isDark ? '#9CA3AF' : '#6B7280'} tick={{ fill: isDark ? '#d1d5db' : '#374151' }} />
-                  <YAxis stroke={isDark ? '#9CA3AF' : '#6B7280'} allowDecimals={false} tick={{ fill: isDark ? '#d1d5db' : '#374151' }} />
-                  <Tooltip
-                    content={<CustomBarTooltip />}
-                    contentStyle={{
-                      backgroundColor: isDark ? '#1F2937' : '#fff',
-                      border: 'none',
-                      borderRadius: '8px',
-                      color: isDark ? '#F9FAFB' : '#111827',
-                    }}
-                  />
-                  <Legend content={<CustomLegend />} />
-                  <Bar dataKey="Total PIC Success Experiences" name="Total PIC Success Experiences" fill="#10B981" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="Total PIC Failure Experiences" name="Total PIC Failure Experiences" fill="#EF4444" radius={[6, 6, 0, 0]} />
+            
+      {/* Charts Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Daily Bar Chart (grouped) */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow border border-gray-100 dark:border-gray-700 lg:col-span-2">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-lg font-semibold text-gray-900 dark:text-white">Daily Outcomes</div>
+            {loading && <div className="text-sm text-gray-500">Loading...</div>}
+            {error && <div className="text-sm text-red-500">{error}</div>}
+                </div>
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={data} barCategoryGap={12} barGap={4}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.2} />
+                <XAxis dataKey="date" stroke="#9CA3AF" />
+                <YAxis stroke="#9CA3AF" allowDecimals={false} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="success" fill="#16a34a" name="Success" radius={[4,4,0,0]} />
+                <Bar dataKey="failure" fill="#dc2626" name="Failure" radius={[4,4,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </div>
-
-          {/* Data Export Section */}
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow p-6 mb-8">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white">Data Export</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Export filtered OTA updates data
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={refreshDashboard}
-                  disabled={refreshing}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white text-sm rounded-lg transition-colors"
-                >
-                  <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-                  {refreshing ? 'Refreshing...' : 'Refresh'}
-                </button>
-                <button
-                  onClick={downloadFilteredUpdates}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors"
-                >
-                  <Download className="h-4 w-4" />
-                  Export Data
-                </button>
-              </div>
-            </div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">
-              <p>• Total Records: {filteredUpdates.length}</p>
-              <p>• Time Range: {timeRange === '7d' ? 'Last 7 days' : timeRange === '30d' ? 'Last 30 days' : 'Last 90 days'}</p>
-              <p>• Project: {selectedProject?.label || 'All Projects'}</p>
-              <p>• Device: {selectedDevice?.label || 'All Devices'}</p>
-            </div>
-          </div>
-
-          {/* OTA Update Status Pie Chart */}
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white">ESP PIC Experience Distribution</h3>
-              <button
-                onClick={downloadPieChartData}
-                className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors"
-              >
-                <Download className="h-4 w-4" />
-                Export
-              </button>
-            </div>
-            <div className="bg-white dark:bg-gray-800 rounded-2xl p-4">
-              <ResponsiveContainer width="100%" height={300}>
+        {/* Outcome Mix Pie */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow border border-gray-100 dark:border-gray-700">
+          <div className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Outcome Mix</div>
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    outerRadius={100}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
+                <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90} label>
                     {pieData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Legend 
-                    content={<CustomLegend />}
-                    layout="horizontal"
-                    verticalAlign="bottom"
-                    align="center"
-                  />
+                <Tooltip />
+                <Legend />
                 </PieChart>
               </ResponsiveContainer>
             </div>
           </div>
         </div>
-      )}
 
-      {/* Message when no project is selected */}
-      {!selectedProject && (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow p-8 text-center">
-          <div className="max-w-md mx-auto">
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-              Select a Project to View Analytics
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              Choose a project from the dropdown above to see detailed analytics, charts, and data for all devices in that project.
-            </p>
-            <div className="text-xs text-gray-400 dark:text-gray-500">
-              <p>• View success/failure rates</p>
-              <p>• Analyze device activity over time</p>
-              <p>• Export data and reports</p>
+      {/* Removed cumulative trend by request */}
+
+      {/* Daily Table */}
+      <div className="mt-6 bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-100 dark:border-gray-700 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+          <div className="text-lg font-semibold text-gray-900 dark:text-white">Daily Breakdown</div>
+        </div>
+        <div className="overflow-auto">
+          <table className="min-w-full divide-y divide-gray-100 dark:divide-gray-700">
+            <thead className="bg-gray-50 dark:bg-gray-900">
+              <tr>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Success</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Failure</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">
+              {data.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-4 py-6 text-center text-gray-500 dark:text-gray-400">No data</td>
+                </tr>
+              )}
+              {data
+                .sort((a, b) => new Date(b.date) - new Date(a.date)) // Sort by date, newest first
+                .map(row => (
+                <tr key={row.date} className="hover:bg-gray-50 dark:hover:bg-gray-900/40">
+                  <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{row.date}</td>
+                  <td className="px-4 py-2 text-sm text-green-600">{row.success}</td>
+                  <td className="px-4 py-2 text-sm text-red-600">{row.failure}</td>
+                  <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{row.total}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
             </div>
           </div>
         </div>
-      )}
+  );
+}
 
-      {/* Message when project is selected but no device */}
-      {selectedProject && !selectedDevice && (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow p-8 text-center">
-          <div className="max-w-md mx-auto">
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-              Select a Device to View Analytics
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              You've selected project "{selectedProject.label}". Now choose a device from the dropdown to see detailed analytics and charts for that specific device.
-            </p>
-            <div className="text-xs text-gray-400 dark:text-gray-500">
-              <p>• Device-specific success/failure rates</p>
-              <p>• Individual device activity over time</p>
-              <p>• Export device-specific data and reports</p>
-            </div>
-          </div>
-        </div>
-      )}
+function StatCard({ title, value, gradientFrom, icon: Icon, iconClass, valueClass }) {
+  return (
+    <div className={`rounded-xl p-5 shadow border border-gray-100 dark:border-gray-800 bg-gradient-to-br ${gradientFrom} to-white dark:from-gray-900 dark:to-gray-800 flex items-center justify-between`}>
+      <div>
+        <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">{title}</div>
+        <div className={`mt-1 text-3xl font-semibold text-gray-900 dark:text-white ${valueClass || ''}`}>{value}</div>
+      </div>
+      {Icon && <Icon className={`h-8 w-8 ${iconClass || 'text-gray-400'}`} />}
     </div>
   );
-};
+}
 
-export default Dashboard; 
+

@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
-import { Plus, Search, Edit, Trash2, Download } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Search, Plus, Trash2, Edit, Download, CheckSquare, Square } from 'lucide-react';
 import { BACKEND_BASE_URL } from '../utils/api';
 import Select from 'react-select';
-import * as XLSX from 'xlsx';
+import './react-select-tailwind.css';
 
 const API_URL = `${BACKEND_BASE_URL}/devices`;
 const PROJECTS_API = `${BACKEND_BASE_URL}/projects`;
@@ -164,96 +164,91 @@ const DeviceManagement = () => {
 
   // Export Device data
   const exportDeviceData = () => {
-    const data = [
-      {
-        sheet: 'Device Management Summary',
-        data: [
-          { 'Export Date': new Date().toLocaleDateString() },
-          { 'Export Time': new Date().toLocaleTimeString() },
-          { 'Exported By': user?.name || 'Unknown' },
-          { 'Total Devices': devices.length },
-          { 'Assigned Devices': devices.filter(d => d.project).length },
-          { 'Unassigned Devices': devices.filter(d => !d.project).length },
-          { 'Search Term': searchTerm || 'None' },
-          { 'Filtered Results': filteredDevices.length }
-        ]
-      },
-      {
-        sheet: 'Device Details',
-        data: devices.map(device => {
-          const project = projects.find(p => p._id === String(device.project));
-          const assignedUsers = users.filter(user => user.projects && user.projects.includes(device.project));
-          
-          return {
-            'Device ID': device._id,
-            'Device Name': device.name,
-            'Device ID (Hardware)': device.deviceId,
-            'Assigned Project': project?.projectName || 'Unassigned',
-            'Project Description': project?.projectDescription || 'N/A',
-            'Status': device.status || 'Active',
-            'Date Created': device.dateCreated ? new Date(device.dateCreated).toLocaleDateString() : 'N/A',
-            'Date Assigned': device.dateAssigned ? new Date(device.dateAssigned).toLocaleDateString() : 'N/A',
-            'Assigned Users': assignedUsers.map(u => u.name).join(', ') || 'None',
-            'Assigned User Emails': assignedUsers.map(u => u.email).join(', ') || 'None',
-            'Total Assigned Users': assignedUsers.length
-          };
-        })
-      },
-      {
-        sheet: 'Project Device Summary',
-        data: projects.map(project => {
-          const projectDevices = devices.filter(d => d.project === project._id);
-          const assignedUsers = users.filter(user => user.projects && user.projects.includes(project._id));
-          
-          return {
-            'Project Name': project.projectName,
-            'Project Description': project.projectDescription || 'N/A',
-            'Total Devices': projectDevices.length,
-            'Device Names': projectDevices.map(d => d.name).join(', ') || 'None',
-            'Device IDs': projectDevices.map(d => d.deviceId).join(', ') || 'None',
-            'Total Assigned Users': assignedUsers.length,
-            'Assigned User Names': assignedUsers.map(u => u.name).join(', ') || 'None',
-            'Assigned User Emails': assignedUsers.map(u => u.email).join(', ') || 'None'
-          };
-        })
-      }
-    ];
+    // Create CSV content
+    let csvContent = '';
 
-    const wb = XLSX.utils.book_new();
-    data.forEach(({ sheet, data }) => {
-      const ws = XLSX.utils.json_to_sheet(data);
-      XLSX.utils.book_append_sheet(wb, ws, sheet);
+    // 1. Device Management Summary Section
+    csvContent += 'Device Management Summary\n';
+    csvContent += 'Export Date,' + new Date().toLocaleDateString() + '\n';
+    csvContent += 'Export Time,' + new Date().toLocaleTimeString() + '\n';
+    csvContent += 'Exported By,' + (user?.name || 'Unknown') + '\n';
+    csvContent += 'Total Devices,' + devices.length + '\n';
+    csvContent += 'Assigned Devices,' + devices.filter(d => d.project).length + '\n';
+    csvContent += 'Unassigned Devices,' + devices.filter(d => !d.project).length + '\n';
+    csvContent += 'Search Term,' + (searchTerm || 'None') + '\n';
+    csvContent += 'Filtered Results,' + filteredDevices.length + '\n';
+    csvContent += '\n';
+
+    // 2. Device Details Section
+    csvContent += 'Device Details\n';
+    csvContent += 'Device ID,Device Name,Device ID (Hardware),Assigned Project,Project Description,Status,Date Created,Date Assigned,Assigned Users,Assigned User Emails,Total Assigned Users\n';
+    
+    devices.forEach(device => {
+      const project = projects.find(p => p._id === String(device.project));
+      const assignedUsers = users.filter(user => user.projects && user.projects.includes(device.project));
+      
+      const row = [
+        device._id,
+        device.name,
+        device.deviceId,
+        project?.projectName || 'Unassigned',
+        project?.projectDescription || 'N/A',
+        device.status || 'Active',
+        device.dateCreated ? new Date(device.dateCreated).toLocaleDateString() : 'N/A',
+        device.dateAssigned ? new Date(device.dateAssigned).toLocaleDateString() : 'N/A',
+        assignedUsers.map(u => u.name).join(', ') || 'None',
+        assignedUsers.map(u => u.email).join(', ') || 'None',
+        assignedUsers.length
+      ];
+      
+      csvContent += row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',') + '\n';
     });
     
-    const fileName = `Device_Management_${new Date().toISOString().split('T')[0]}.xlsx`;
-    XLSX.writeFile(wb, fileName);
+    csvContent += '\n';
+
+    // 3. Project Device Summary Section
+    csvContent += 'Project Device Summary\n';
+    csvContent += 'Project Name,Project Description,Total Devices,Device Names,Device IDs,Total Assigned Users,Assigned User Names,Assigned User Emails\n';
+    
+    projects.forEach(project => {
+      const projectDevices = devices.filter(d => d.project === project._id);
+      const assignedUsers = users.filter(user => user.projects && user.projects.includes(project._id));
+      
+      const row = [
+        project.projectName,
+        project.projectDescription || 'N/A',
+        projectDevices.length,
+        projectDevices.map(d => d.name).join(', ') || 'None',
+        projectDevices.map(d => d.deviceId).join(', ') || 'None',
+        assignedUsers.length,
+        assignedUsers.map(u => u.name).join(', ') || 'None',
+        assignedUsers.map(u => u.email).join(', ') || 'None'
+      ];
+      
+      csvContent += row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',') + '\n';
+    });
+
+    // Create and download CSV file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    
+    const fileName = `Device_Management_${new Date().toISOString().split('T')[0]}.csv`;
+    link.setAttribute('download', fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Device Management</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Manage and monitor all your IoT devices</p>
-        </div>
-        <div className="mt-4 sm:mt-0 flex gap-2">
-          <button
-            onClick={exportDeviceData}
-            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-          >
-            <Download className="h-4 w-4 mr-2" />
-            Export Data
-          </button>
-          {user && user.role === 'admin' && (
-          <button onClick={handleAdd} className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-            <Plus className="h-4 w-4 mr-2" /> Add Device
-          </button>
-          )}
-        </div>
-      </div>
-      <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-4 sm:space-y-0 sm:space-x-4">
-          <div className="flex-1 max-w-sm">
+      {/* Header Card */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          {/* Search Section */}
+          <div className="flex-1 max-w-md">
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-5 w-5 text-gray-400" />
@@ -263,9 +258,43 @@ const DeviceManagement = () => {
                 placeholder="Search by name or ID..."
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                className="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md leading-5 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg leading-5 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
               />
             </div>
+            
+            {/* Search Results Summary */}
+            {searchTerm && (
+              <div className="mt-2 flex items-center justify-between text-xs">
+                <span className="text-gray-600 dark:text-gray-400">
+                  {filteredDevices.length} of {devices.length} devices
+                </span>
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium"
+                >
+                  Clear search
+                </button>
+              </div>
+            )}
+          </div>
+          
+          {/* Action Buttons */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={exportDeviceData}
+              className="inline-flex items-center justify-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors"
+            >
+              <Download className="h-4 w-4 mr-2" /> Export CSV
+            </button>
+            {user && user.role === 'admin' && (
+              <button 
+                onClick={handleAdd} 
+                className="inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+              >
+                <Plus className="h-4 w-4 mr-2" /> 
+                Add Device
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -354,6 +383,8 @@ const DeviceManagement = () => {
                         onChange={setSelectedProject}
                         isClearable
                         placeholder="Select project..."
+                        className="react-select-container"
+                        classNamePrefix="react-select"
                       />
                     </div>
                   );
