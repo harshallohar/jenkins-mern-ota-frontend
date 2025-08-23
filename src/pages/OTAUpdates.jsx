@@ -465,11 +465,12 @@ export default function OTAUpdates() {
                 <th className="px-4 py-2">
                   <input type="checkbox" onChange={(e) => e.target.checked ? selectAllVisible() : clearSelection()} />
                 </th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Timestamp</th>
+                
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">PIC ID</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Device</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">From → To</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Timestamp</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
@@ -490,11 +491,9 @@ export default function OTAUpdates() {
                       onChange={() => toggleSelected(update._id)} 
                     />
                   </td>
-                  <td className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">
-                    {formatTimestamp(update.timestamp || update.createdAt)}
-                  </td>
+                  
                   <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100 font-mono text-xs">
-                    {update.pic_id.substring(0, 8)}...
+                    {update.pic_id}
                   </td>
                   <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono text-xs">
                     {update.deviceId}
@@ -506,6 +505,9 @@ export default function OTAUpdates() {
                     <Badge badge={update.badge} color={update.color}>
                       {update.statusMessage || update.status}
                     </Badge>
+                  </td>
+                  <td className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">
+                    {formatTimestamp(update.timestamp || update.createdAt)}
                   </td>
                   <td className="px-4 py-2 text-right">
                     <button
