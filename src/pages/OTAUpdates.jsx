@@ -7,7 +7,6 @@ import './react-select-tailwind.css';
 const DEVICES_API = `${BACKEND_BASE_URL}/devices`;
 const PROJECTS_API = `${BACKEND_BASE_URL}/projects`;
 const OTA_LIST_API = `${BACKEND_BASE_URL}/ota-updates`;
-const OTA_ATTEMPTS_API = `${BACKEND_BASE_URL}/ota-updates/attempts`;
 
 function Badge({ badge, color, children }) {
   const base = 'px-2 py-0.5 rounded text-xs font-medium';
@@ -15,7 +14,7 @@ function Badge({ badge, color, children }) {
     ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
     : badge === 'failure'
       ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-      : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
+      : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
   const style = color ? { borderLeft: `4px solid ${color}` } : {};
   return <span className={`${base} ${byBadge}`} style={style}>{children}</span>;
 }
@@ -30,6 +29,27 @@ export default function OTAUpdates() {
   const [updates, setUpdates] = useState([]);
   const [cards, setCards] = useState({ success: 0, failure: 0, other: 0, total: 0 });
   const [exporting, setExporting] = useState(false);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 50,
+    total: 0,
+    pages: 0
+  });
+
+
+  const [userRole, setUserRole] = useState(null);
+
+  useEffect(() => {
+    const storedUser = localStorage.getItem("user");
+    if (storedUser) {
+      try {
+        const parsed = JSON.parse(storedUser);
+        setUserRole(parsed.role);
+      } catch {}
+    }
+  }, []);
+
+
 
   // Load projects and devices
   useEffect(() => {
@@ -100,105 +120,116 @@ export default function OTAUpdates() {
   const computeCardsFromUpdates = (list) => {
     let success = 0, failure = 0, other = 0, total = 0;
     for (const u of list) {
-      // Attempt-level item
-      if (!u.statusEntries) {
-        total += 1;
-        if (u.badge === 'success') success += 1;
-        else if (u.badge === 'failure') failure += 1;
-        else other += 1;
-        continue;
-      }
-      // Record-level fallback
-      for (const e of (u.statusEntries || [])) {
-        total += 1;
-        if (e.badge === 'success') success += 1;
-        else if (e.badge === 'failure') failure += 1;
-        else other += 1;
-      }
+      total += 1;
+      if (u.badge === 'success') success += 1;
+      else if (u.badge === 'failure') failure += 1;
+      else other += 1;
     }
     return { success, failure, other, total };
   };
 
-  const fetchData = async () => {
+  const fetchData = async (page = 1) => {
     setLoading(true);
     setError('');
     try {
-      // Build the API URL based on selections
-      let listUrl = OTA_ATTEMPTS_API;
+      // Build the API URL with query parameters
       const params = new URLSearchParams();
+      params.set('page', page.toString());
+      params.set('limit', pagination.limit.toString());
       
       if (selectedDevice) {
         params.set('deviceId', selectedDevice.value);
       }
-      // If only project is selected, we'll fetch all data and filter client-side
-      
-      if (params.toString()) {
-        listUrl += `?${params.toString()}`;
+      if (selectedProject) {
+        params.set('projectId', selectedProject.value);
       }
       
-      const [listRes] = await Promise.all([fetch(listUrl)]);
+      const token = localStorage.getItem('authToken');
+      const listUrl = `${OTA_LIST_API}?${params.toString()}`;
+      const listRes = await fetch(listUrl, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
       if (!listRes.ok) throw new Error('Failed to load updates');
       const listData = await listRes.json();
-      setUpdates(Array.isArray(listData) ? listData : []);
-
-      // Compute cards from the filtered updates (this will be computed after state update)
-      // The cards will be updated in the useEffect below when filteredUpdates changes
+      
+      if (listData.success) {
+        setUpdates(listData.data || []);
+        setPagination({
+          page: listData.pagination.page,
+          limit: listData.pagination.limit,
+          total: listData.pagination.total,
+          pages: listData.pagination.pages
+        });
+      } else {
+        setUpdates([]);
+        setPagination({ page: 1, limit: 50, total: 0, pages: 0 });
+      }
     } catch (e) {
       setError(e.message || 'Error loading data');
+      setUpdates([]);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    // Only fetch data when we have both project and device selected
-    if (selectedProject && selectedDevice) {
-      fetchData();
+    // Fetch data when project or device selection changes
+    if (selectedProject) {
+      fetchData(1); // Reset to first page
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject, selectedDevice]);
 
   // Update cards whenever filtered updates change
   useEffect(() => {
-    // Compute cards from the filtered updates whenever they change
     const computed = computeCardsFromUpdates(filteredUpdates);
     setCards(computed);
   }, [filteredUpdates]);
 
-  // Selection state for bulk delete (by recordId)
+  // Selection state for bulk delete
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const toggleSelected = (recordId) => {
+  const toggleSelected = (id) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
-      if (next.has(recordId)) next.delete(recordId); else next.add(recordId);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   };
   const selectAllVisible = () => {
-    const ids = new Set(filteredUpdates.map(u => u.recordId));
+    const ids = new Set(filteredUpdates.map(u => u._id));
     setSelectedIds(ids);
   };
   const clearSelection = () => setSelectedIds(new Set());
 
-  const handleDelete = async (recordId) => {
-    if (!recordId) return;
-    if (!confirm('Delete this OTA record?')) return;
+  const handleDelete = async (id) => {
+    if (!id) return;
+    if (!confirm('Delete this OTA update record?')) return;
     try {
-      const res = await fetch(`${OTA_LIST_API}/${recordId}`, { method: 'DELETE' });
+      const token = localStorage.getItem('authToken');
+      const res = await fetch(`${OTA_LIST_API}/${id}`, { 
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
       if (!res.ok) throw new Error('Delete failed');
-      await fetchData();
+      await fetchData(pagination.page);
       clearSelection();
     } catch (e) {
       alert(e.message || 'Error deleting');
     }
   };
+
   const handleBulkDelete = async () => {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
     if (!confirm(`Delete ${ids.length} selected record(s)?`)) return;
     try {
-      await Promise.all(ids.map(id => fetch(`${OTA_LIST_API}/${id}`, { method: 'DELETE' })));
-      await fetchData();
+      const token = localStorage.getItem('authToken');
+      await Promise.all(ids.map(id => fetch(`${OTA_LIST_API}/${id}`, { 
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      })));
+      await fetchData(pagination.page);
       clearSelection();
     } catch (e) {
       alert(e.message || 'Bulk delete failed');
@@ -218,7 +249,7 @@ export default function OTAUpdates() {
 
       // Create CSV headers
       const headers = [
-        'Date',
+        'Timestamp',
         'PIC ID',
         'Device ID',
         'Device Name',
@@ -228,13 +259,19 @@ export default function OTAUpdates() {
         'Status',
         'Status Message',
         'Badge',
-        'Attempt Number',
-        'Record ID'
+        'Color'
       ];
 
       // Create CSV rows
       const rows = exportData.map(update => [
-        new Date(update.date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' }),
+        new Date(update.timestamp || update.createdAt).toLocaleString('en-US', { 
+          month: '2-digit', 
+          day: '2-digit', 
+          year: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        }),
         `"${update.pic_id}"`, // Wrap PIC ID in quotes to preserve full length
         update.deviceId,
         devices.find(d => d.deviceId === update.deviceId)?.name || 'Unknown',
@@ -244,8 +281,7 @@ export default function OTAUpdates() {
         update.status,
         update.statusMessage || '',
         update.badge,
-        update.attemptNumber || 1,
-        update.recordId || update._id || ''
+        update.color || ''
       ]);
 
       // Add summary section at the top
@@ -303,6 +339,24 @@ export default function OTAUpdates() {
     }
   };
 
+  const handlePageChange = (newPage) => {
+    if (newPage >= 1 && newPage <= pagination.pages) {
+      fetchData(newPage);
+    }
+  };
+
+  const formatTimestamp = (timestamp) => {
+    if (!timestamp) return '-';
+    const date = new Date(timestamp);
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
+
   return (
     <div className="p-4 md:p-6">
       {/* Header Card */}
@@ -338,7 +392,7 @@ export default function OTAUpdates() {
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-3">
             <button
-              onClick={fetchData}
+              onClick={() => fetchData(pagination.page)}
               className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm transition-colors"
             >
               <RefreshCw className="h-4 w-4 mr-2" /> Refresh
@@ -351,6 +405,8 @@ export default function OTAUpdates() {
               <Download className="h-4 w-4 mr-2" /> 
               {exporting ? 'Exporting...' : 'Export CSV'}
             </button>
+
+            {userRole === "admin" && (
             <button
               onClick={handleBulkDelete}
               disabled={selectedIds.size === 0}
@@ -358,12 +414,13 @@ export default function OTAUpdates() {
             >
               Delete Selected ({selectedIds.size})
             </button>
+            )}
           </div>
         </div>
       </div>
 
       {/* Loading State */}
-      {(!selectedProject || !selectedDevice) && (
+      {(!selectedProject) && (
         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-6">
           <div className="flex items-center">
             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-3"></div>
@@ -390,7 +447,7 @@ export default function OTAUpdates() {
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow border border-gray-100 dark:border-gray-700">
           <div className="text-sm text-gray-500 dark:text-gray-400">Other</div>
-          <div className="text-2xl font-semibold text-gray-600 dark:text-gray-300">{cards.other}</div>
+          <div className="text-2xl font-semibold text-yellow-600">{cards.other}</div>
         </div>
       </div>
 
@@ -400,7 +457,7 @@ export default function OTAUpdates() {
           <div className="text-lg font-semibold text-gray-900 dark:text-white">OTA Updates</div>
           {loading && <div className="text-sm text-gray-500">Loading...</div>}
           {error && <div className="text-sm text-red-500">{error}</div>}
-      </div>
+        </div>
         <div className="overflow-auto">
           <table className="min-w-full divide-y divide-gray-100 dark:divide-gray-700">
             <thead className="bg-gray-50 dark:bg-gray-900">
@@ -408,56 +465,91 @@ export default function OTAUpdates() {
                 <th className="px-4 py-2">
                   <input type="checkbox" onChange={(e) => e.target.checked ? selectAllVisible() : clearSelection()} />
                 </th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Timestamp</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">PIC ID</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Device</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">From → To</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Attempt</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Latest Status</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Updated</th>
-                <th className="px-4 py-2"></th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">
               {filteredUpdates.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-gray-500 dark:text-gray-400">No updates found</td>
+                  <td colSpan={7} className="px-4 py-6 text-center text-gray-500 dark:text-gray-400">
+                    {loading ? 'Loading...' : 'No updates found'}
+                  </td>
                 </tr>
               )}
-              {filteredUpdates.map(u => {
-                const latest = { statusMessage: u.statusMessage, status: u.status, badge: u.badge, color: u.color };
-                return (
-                  <tr key={u.attemptId || `${u.recordId}-${u.date}`} className="hover:bg-gray-50 dark:hover:bg-gray-900/40">
-                    <td className="px-4 py-2">
-                      <input type="checkbox" checked={selectedIds.has(u.recordId)} onChange={() => toggleSelected(u.recordId)} />
-                    </td>
-                    <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100 font-mono">{u.pic_id}</td>
-                    <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">{u.deviceId}</td>
-                    <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">{u.previousVersion} → {u.updatedVersion}</td>
-                    <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">{u.attemptNumber}</td>
-                    <td className="px-4 py-2 text-sm">
-                      {latest ? (
-                        <Badge badge={latest.badge} color={latest.color}>{latest.statusMessage || latest.status}</Badge>
-                      ) : (
-                        <span className="text-gray-500">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">{new Date(u.date).toLocaleString()}</td>
-                    <td className="px-4 py-2 text-right">
-                      <button
-                        onClick={() => handleDelete(u.recordId)}
-                        className="inline-flex items-center px-2 py-1 text-sm text-red-600 hover:text-red-700"
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-              </tbody>
-            </table>
-          </div>
+              {filteredUpdates.map(update => (
+                <tr key={update._id} className="hover:bg-gray-50 dark:hover:bg-gray-900/40">
+                  <td className="px-4 py-2">
+                    <input 
+                      type="checkbox" 
+                      checked={selectedIds.has(update._id)} 
+                      onChange={() => toggleSelected(update._id)} 
+                    />
+                  </td>
+                  <td className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">
+                    {formatTimestamp(update.timestamp || update.createdAt)}
+                  </td>
+                  <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100 font-mono text-xs">
+                    {update.pic_id.substring(0, 8)}...
+                  </td>
+                  <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono text-xs">
+                    {update.deviceId}
+                  </td>
+                  <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">
+                    {update.previousVersion} → {update.updatedVersion}
+                  </td>
+                  <td className="px-4 py-2 text-sm">
+                    <Badge badge={update.badge} color={update.color}>
+                      {update.statusMessage || update.status}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <button
+                      onClick={() => handleDelete(update._id)}
+                      className="inline-flex items-center px-2 py-1 text-sm text-red-600 hover:text-red-700"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+
+        {/* Pagination */}
+        {pagination.pages > 1 && (
+          <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
+            <div className="text-sm text-gray-700 dark:text-gray-300">
+              Showing page {pagination.page} of {pagination.pages} ({pagination.total} total records)
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => handlePageChange(pagination.page - 1)}
+                disabled={pagination.page <= 1}
+                className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Previous
+              </button>
+              <span className="px-3 py-1 text-sm text-gray-700 dark:text-gray-300">
+                {pagination.page}
+              </span>
+              <button
+                onClick={() => handlePageChange(pagination.page + 1)}
+                disabled={pagination.page >= pagination.pages}
+                className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

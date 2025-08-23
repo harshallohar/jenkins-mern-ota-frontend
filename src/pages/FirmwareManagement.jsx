@@ -30,6 +30,21 @@ const FirmwareManagement = () => {
   const DEVICES_API = `${BACKEND_BASE_URL}/devices`;
   const PROJECTS_API = `${BACKEND_BASE_URL}/projects`;
 
+
+  const [userRole, setUserRole] = useState(null);
+
+  useEffect(() => {
+    const storedUser = localStorage.getItem("user");
+    if (storedUser) {
+      try {
+        const parsed = JSON.parse(storedUser);
+        setUserRole(parsed.role);
+      } catch {}
+    }
+  }, []);
+
+
+
   // Fetch firmwares
   const fetchFirmwares = async () => {
     setLoading(true);
@@ -655,12 +670,14 @@ const FirmwareManagement = () => {
                 >
                   <CheckSquare className="h-4 w-4 rotate-180" /> Download Selected
                 </button>
+                {userRole === "admin" && (
                 <button
                   className="flex items-center gap-2 px-4 py-2 rounded-md bg-red-600 text-white font-semibold shadow hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 transition text-sm disabled:opacity-50"
                   onClick={handleDeleteSelected}
                 >
                   <Trash2 className="h-4 w-4" /> Delete Selected
                 </button>
+                )}
               </div>
             )}
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
