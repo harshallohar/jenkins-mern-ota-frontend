@@ -36,8 +36,12 @@ export default function OTAUpdates() {
     pages: 0
   });
 
-
   const [userRole, setUserRole] = useState(null);
+
+  // New UI states for badge filter + version search
+  const [badgeFilter, setBadgeFilter] = useState('all'); // 'all'|'success'|'failure'|'other'
+  const [versionInput, setVersionInput] = useState(''); // what user types
+  const [versionQuery, setVersionQuery] = useState(''); // applied query (set on Search)
 
   useEffect(() => {
     const storedUser = localStorage.getItem("user");
@@ -48,8 +52,6 @@ export default function OTAUpdates() {
       } catch {}
     }
   }, []);
-
-
 
   // Load projects and devices
   useEffect(() => {
@@ -87,7 +89,6 @@ export default function OTAUpdates() {
       setSelectedDevice(null);
       return;
     }
-    // If current selected device is not part of this project, or not set, pick first
     const isCurrentValid = selectedDevice && projectDevices.some(d => d.deviceId === selectedDevice.value);
     if (!isCurrentValid) {
       const d0 = projectDevices[0];
@@ -103,20 +104,13 @@ export default function OTAUpdates() {
       .map(d => ({ value: d.deviceId, label: `${d.name} (${d.deviceId})` }));
   }, [devices, selectedProject]);
 
+  // filteredUpdates: page items after local device/project filter (still paginated)
   const filteredUpdates = useMemo(() => {
-    if (selectedDevice) {
-      // If device is selected, filter by that specific device
-      return updates.filter(u => u.deviceId === selectedDevice.value);
-    }
-    if (selectedProject) {
-      // If only project is selected, filter by devices in that project
-      const allowedDeviceIds = new Set(devices.filter(d => d.project === selectedProject.value).map(d => d.deviceId));
-      return updates.filter(u => allowedDeviceIds.has(u.deviceId));
-    }
-    // If nothing is selected, return all updates
+    // updates are already filtered server-side by device/project/badge/version for the page
     return updates;
-  }, [updates, selectedProject, selectedDevice, devices]);
+  }, [updates]);
 
+  // Helper: compute counts from a list (used only as fallback if server didn't return counts)
   const computeCardsFromUpdates = (list) => {
     let success = 0, failure = 0, other = 0, total = 0;
     for (const u of list) {
@@ -128,64 +122,78 @@ export default function OTAUpdates() {
     return { success, failure, other, total };
   };
 
+  // fetchData: uses badgeFilter and versionQuery to request page + counts from server
   const fetchData = async (page = 1) => {
     setLoading(true);
     setError('');
     try {
-      // Build the API URL with query parameters
       const params = new URLSearchParams();
       params.set('page', page.toString());
       params.set('limit', pagination.limit.toString());
-      
-      if (selectedDevice) {
-        params.set('deviceId', selectedDevice.value);
-      }
-      if (selectedProject) {
-        params.set('projectId', selectedProject.value);
-      }
-      
+
+      if (selectedDevice) params.set('deviceId', selectedDevice.value);
+      if (selectedProject) params.set('projectId', selectedProject.value);
+      if (badgeFilter && badgeFilter !== 'all') params.set('badge', badgeFilter);
+      if (versionQuery && versionQuery.trim() !== '') params.set('versionQuery', versionQuery.trim());
+
       const token = localStorage.getItem('authToken');
       const listUrl = `${OTA_LIST_API}?${params.toString()}`;
       const listRes = await fetch(listUrl, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      
       if (!listRes.ok) throw new Error('Failed to load updates');
       const listData = await listRes.json();
-      
+
       if (listData.success) {
-        setUpdates(listData.data || []);
+        setUpdates(Array.isArray(listData.data) ? listData.data : []);
         setPagination({
           page: listData.pagination.page,
           limit: listData.pagination.limit,
           total: listData.pagination.total,
           pages: listData.pagination.pages
         });
+
+        if (listData.counts) {
+          setCards({
+            success: listData.counts.success || 0,
+            failure: listData.counts.failure || 0,
+            other: listData.counts.other || 0,
+            total: listData.counts.total || ((listData.counts.success||0) + (listData.counts.failure||0) + (listData.counts.other||0))
+          });
+        } else {
+          // fallback: compute from whole received page (not ideal)
+          setCards(computeCardsFromUpdates(listData.data || []));
+        }
       } else {
         setUpdates([]);
         setPagination({ page: 1, limit: 50, total: 0, pages: 0 });
+        setCards({ success: 0, failure: 0, other: 0, total: 0 });
       }
     } catch (e) {
       setError(e.message || 'Error loading data');
       setUpdates([]);
+      setCards({ success: 0, failure: 0, other: 0, total: 0 });
     } finally {
       setLoading(false);
     }
   };
 
+  // On project/device change -> reload first page and clear version filters
   useEffect(() => {
-    // Fetch data when project or device selection changes
-    if (selectedProject) {
-      fetchData(1); // Reset to first page
-    }
+    setVersionInput('');
+    setVersionQuery('');
+    // Fetch first page
+    if (selectedProject) fetchData(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject, selectedDevice]);
 
-  // Update cards whenever filtered updates change
+  // When badgeFilter changes -> clear versionInput & applied versionQuery and fetch
   useEffect(() => {
-    const computed = computeCardsFromUpdates(filteredUpdates);
-    setCards(computed);
-  }, [filteredUpdates]);
+    setVersionInput('');
+    setVersionQuery('');
+    if (selectedProject) fetchData(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [badgeFilter]);
 
   // Selection state for bulk delete
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -239,40 +247,22 @@ export default function OTAUpdates() {
   const exportOTAUpdates = async () => {
     setExporting(true);
     try {
-      // Get the current filtered updates data
-      const exportData = filteredUpdates.length > 0 ? filteredUpdates : updates;
-      
+      // For export we will request server page with limit large enough to capture all matching records
+      // Alternatively you can hit a dedicated export endpoint. For now we'll reuse current fetched items if present,
+      // otherwise alert that export requires current page data.
+      const exportData = updates.length > 0 ? updates : [];
       if (exportData.length === 0) {
-        alert('No data to export');
+        alert('No data to export (please ensure results are loaded)');
         return;
       }
 
-      // Create CSV headers
       const headers = [
-        'Timestamp',
-        'PIC ID',
-        'Device ID',
-        'Device Name',
-        'Project',
-        'Previous Version',
-        'Updated Version',
-        'Status',
-        'Status Message',
-        'Badge',
-        'Color'
+        'Timestamp','PIC ID','Device ID','Device Name','Project','Previous Version','Updated Version','Status','Status Message','Badge','Color'
       ];
 
-      // Create CSV rows
       const rows = exportData.map(update => [
-        new Date(update.timestamp || update.createdAt).toLocaleString('en-US', { 
-          month: '2-digit', 
-          day: '2-digit', 
-          year: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: true
-        }),
-        `"${update.pic_id}"`, // Wrap PIC ID in quotes to preserve full length
+        new Date(update.timestamp || update.createdAt).toLocaleString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }),
+        `"${update.pic_id}"`,
         update.deviceId,
         devices.find(d => d.deviceId === update.deviceId)?.name || 'Unknown',
         projects.find(p => p._id === devices.find(d => d.deviceId === update.deviceId)?.project)?.projectName || 'Unassigned',
@@ -284,7 +274,6 @@ export default function OTAUpdates() {
         update.color || ''
       ]);
 
-      // Add summary section at the top
       const summaryRows = [
         ['OTA Updates Export Summary'],
         [''],
@@ -305,26 +294,20 @@ export default function OTAUpdates() {
         headers
       ];
 
-      // Combine summary and data rows
       const allRows = [...summaryRows, ...rows];
-      
-      // Create CSV content with proper escaping
-      const csv = allRows.map(row => 
-        row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
-      ).join('\n');
 
-      // Create and download the file
+      const csv = allRows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      
-      // Create filename with date range if available
+
       let filename = 'ota_updates_export';
       if (selectedProject) filename += `_${selectedProject.label.replace(/\s+/g, '_')}`;
       if (selectedDevice) filename += `_${selectedDevice.label.split(' (')[0].replace(/\s+/g, '_')}`;
       filename += `_${new Date().toISOString().slice(0, 10)}.csv`;
-      
+
       link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
@@ -357,15 +340,34 @@ export default function OTAUpdates() {
     });
   };
 
+  // UI helpers: which version field based on badgeFilter
+  const versionFieldLabel = () => {
+    if (badgeFilter === 'failure') return 'Search previous version';
+    return 'Search updated version';
+  };
+
+  const handleSearchApply = () => {
+    // apply typed input to versionQuery and fetch page 1
+    setVersionQuery(versionInput.trim());
+    fetchData(1);
+  };
+
+  const handleClearSearch = () => {
+    setVersionInput('');
+    setVersionQuery('');
+    fetchData(1);
+  };
+
   return (
     <div className="p-4 md:p-6">
       {/* Header Card */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="space-y-4">
           {/* Filters Section */}
-          <div className="flex-1 max-w-2xl">
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="min-w-[220px]">
+          <div className="flex flex-col lg:flex-row lg:items-start gap-4">
+            {/* Main filters row */}
+            <div className="flex flex-col sm:flex-row gap-3 flex-1">
+              <div className="min-w-[200px]">
                 <Select
                   classNamePrefix="react-select"
                   placeholder="Select Project"
@@ -386,36 +388,79 @@ export default function OTAUpdates() {
                   isDisabled={!selectedProject}
                 />
               </div>
+
+              {/* Badge Filter */}
+              <div className="min-w-[180px]">
+                <select
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
+                  value={badgeFilter}
+                  onChange={(e) => setBadgeFilter(e.target.value)}
+                >
+                  <option value="all">All</option>
+                  <option value="success">Success</option>
+                  <option value="failure">Failure</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Action Buttons - Always on right */}
+            <div className="flex flex-col sm:flex-row gap-3 flex-shrink-0">
+              <button
+                onClick={() => fetchData(pagination.page)}
+                className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm transition-colors whitespace-nowrap"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+              </button>
+              <button
+                onClick={exportOTAUpdates}
+                disabled={updates.length === 0}
+                className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+              >
+                <Download className="h-4 w-4 mr-2" /> 
+                {exporting ? 'Exporting...' : 'Export CSV'}
+              </button>
+
+              {userRole === "admin" && (
+                <button
+                  onClick={handleBulkDelete}
+                  disabled={selectedIds.size === 0}
+                  className={`inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm transition-colors whitespace-nowrap ${selectedIds.size === 0 ? 'bg-red-300 cursor-not-allowed text-white' : 'bg-red-600 hover:bg-red-700 text-white'}`}
+                >
+                  Delete Selected ({selectedIds.size})
+                </button>
+              )}
             </div>
           </div>
-          
-          {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              onClick={() => fetchData(pagination.page)}
-              className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm transition-colors"
-            >
-              <RefreshCw className="h-4 w-4 mr-2" /> Refresh
-            </button>
-            <button
-              onClick={exportOTAUpdates}
-              disabled={updates.length === 0}
-              className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <Download className="h-4 w-4 mr-2" /> 
-              {exporting ? 'Exporting...' : 'Export CSV'}
-            </button>
 
-            {userRole === "admin" && (
-            <button
-              onClick={handleBulkDelete}
-              disabled={selectedIds.size === 0}
-              className={`inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm transition-colors ${selectedIds.size === 0 ? 'bg-red-300 cursor-not-allowed text-white' : 'bg-red-600 hover:bg-red-700 text-white'}`}
-            >
-              Delete Selected ({selectedIds.size})
-            </button>
-            )}
-          </div>
+          {/* Version search row - Only shown when badge filter is not 'all' */}
+          {badgeFilter !== 'all' && (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+              <div className="flex items-center gap-2 flex-1 max-w-md">
+                <input
+                  type="text"
+                  placeholder={versionFieldLabel()}
+                  value={versionInput}
+                  onChange={(e) => setVersionInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSearchApply(); }}
+                  className="flex-1 rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
+                />
+                <button
+                  onClick={handleSearchApply}
+                  className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700 text-white text-sm transition-colors whitespace-nowrap"
+                >
+                  Search
+                </button>
+                <button
+                  onClick={handleClearSearch}
+                  disabled={!versionInput && !versionQuery}
+                  className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -555,5 +600,3 @@ export default function OTAUpdates() {
     </div>
   );
 }
-
-

@@ -398,19 +398,7 @@ useEffect(() => {
 
   return (
     <div className="p-4 md:p-6 space-y-6">
-      {/* Date Range Display */}
-      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-        <div className="text-sm text-blue-800 dark:text-blue-200">
-          <span className="font-medium">Current Date Range:</span> 
-          {customMode ? (
-            <span className="ml-2">{formatDateInput(startDateInput)} to {formatDateInput(endDateInput)}</span>
-          ) : (
-            <span className="ml-2">Last {range} days (from {formatDateInput(startDateInput)} to {formatDateInput(endDateInput)})</span>
-          )}
-        </div>
-      </div>
-
-      {/* Filter Bar */}
+      
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-4 shadow-sm">
         <div className="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
           <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
