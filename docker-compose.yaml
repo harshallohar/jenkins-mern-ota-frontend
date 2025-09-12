@@ -4,9 +4,35 @@ services:
   frontend:
     build:
       context: .
-    ports:
-      - "80:80"
     container_name: my-frontend-v2
     restart: always
+    expose:
+      - "3000"
     environment:
       - NODE_ENV=production
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx-proxy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    depends_on:
+      - frontend
+
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    command: certonly --webroot -w /var/www/certbot \
+      --force-renewal \
+      --email your@email.com \
+      -d ota.aproposdrive.com \
+      --agree-tos --no-eff-email
