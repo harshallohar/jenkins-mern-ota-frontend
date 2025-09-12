@@ -3,25 +3,26 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies
+# Only install dependencies first for better caching
 COPY package*.json ./
 RUN npm ci
 
-# Copy source and build
+# Now copy the full app and build it
 COPY . .
 RUN npm run build
 
 # Stage 2: Serve with NGINX
 FROM nginx:alpine
 
-# Remove default nginx static files
+# Remove default content
 RUN rm -rf /usr/share/nginx/html/*
 
 # Copy built frontend
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Use simple NGINX config (no SSL here)
+# Copy your custom NGINX config
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
+
 CMD ["nginx", "-g", "daemon off;"]
