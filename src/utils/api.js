@@ -1,2 +1,2 @@
 // Utility for backend API base URL
-export const BACKEND_BASE_URL = 'http://18.222.232.247:5000'; 
+export const BACKEND_BASE_URL = 'http://3.144.5.206:5000'; 
