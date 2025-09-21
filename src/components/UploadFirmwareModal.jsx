@@ -2,6 +2,10 @@ import { Upload, X, AlertCircle } from 'lucide-react';
 import Select from 'react-select';
 import '../pages/react-select-tailwind.css';
 
+import { BACKEND_BASE_URL } from '../utils/api';
+import React, { useEffect, useState } from "react";
+
+
 const UploadFirmwareModal = ({
   show,
   onClose,
@@ -42,6 +46,40 @@ const UploadFirmwareModal = ({
 
   const expectedFilename = getExpectedFilename();
   const isFilenameValid = file ? validateFilename(file.name) : false;
+
+
+  const [versionError, setVersionError] = useState("");
+  const [checkingVersion, setCheckingVersion] = useState(false);
+
+  // Check version whenever version or device changes
+  useEffect(() => {
+    const checkVersion = async () => {
+      if (!version || !selectedDevice) {
+        setVersionError("");
+        return;
+      }
+      setCheckingVersion(true);
+      try {
+        const res = await fetch(
+          `${BACKEND_BASE_URL}/firmware/check-version?esp_id=${selectedDevice.value}&version=${version}`
+        );
+        const data = await res.json();
+        if (data.exists) setVersionError("This version already exists for the selected device.");
+        else setVersionError("");
+      } catch (err) {
+        setVersionError("Failed to check version. Try again.");
+      } finally {
+        setCheckingVersion(false);
+      }
+    };
+
+    const delayDebounce = setTimeout(checkVersion, 500); // debounce
+    return () => clearTimeout(delayDebounce);
+  }, [version, selectedDevice]);
+
+  if (!show) return null;
+
+
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
@@ -198,6 +236,10 @@ const UploadFirmwareModal = ({
                   onChange={e => setVersion(e.target.value)}
                   required
                 />
+                {checkingVersion && <p className="text-xs text-gray-500 mt-1">Checking version...</p>}
+                {versionError && <p className="text-xs text-red-500 mt-1">{versionError}</p>}
+                
+            
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>

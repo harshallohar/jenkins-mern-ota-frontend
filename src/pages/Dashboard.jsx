@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Select from 'react-select';
-import { RefreshCw, Download as DownloadIcon, Trash2, CheckCircle, XCircle, CircleSlash } from 'lucide-react';
+import { RefreshCw, Download as DownloadIcon, Trash2, CheckCircle, XCircle, CircleSlash, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from 'recharts';
 import { BACKEND_BASE_URL } from '../utils/api';
 import './react-select-tailwind.css';
@@ -25,6 +25,10 @@ export default function Dashboard() {
   const [customMode, setCustomMode] = useState(false);
 
   const [userRole, setUserRole] = useState(null);
+
+  // Pagination state for Daily Breakdown table
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
 useEffect(() => {
   const storedUser = localStorage.getItem("user");
@@ -146,6 +150,30 @@ useEffect(() => {
     const start = new Date(startDate);
     const end = new Date(endDate);
     return start <= end;
+  };
+
+  // Pagination calculations
+  const sortedChartData = useMemo(() => {
+    return chartData.barChartData.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [chartData.barChartData]);
+
+  const totalPages = Math.ceil(sortedChartData.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedData = sortedChartData.slice(startIndex, endIndex);
+
+  // Reset pagination when data changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedProject, selectedDevice, range, customMode, startDateInput, endDateInput]);
+
+  const handlePageChange = (newPage) => {
+    setCurrentPage(newPage);
+  };
+
+  const handleItemsPerPageChange = (newItemsPerPage) => {
+    setItemsPerPage(newItemsPerPage);
+    setCurrentPage(1);
   };
 
   // fetchChartData same as before
@@ -456,11 +484,6 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* (rest of the dashboard UI remains unchanged) */}
-      {/* Summary Cards, Charts, Daily Table, Recent Updates — same as earlier component */}
-      {/* For brevity, keep the rest of your UI code unchanged (you can re-use the previous component's JSX) */}
-      {/* ... */}
-      
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard title="Total" value={chartData.totalCounts.total} gradientFrom="from-blue-50" icon={CircleSlash} iconClass="text-blue-600" />
@@ -511,11 +534,28 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* Daily Table */}
+      {/* Daily Table with Pagination */}
       <div className="mt-6 bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-100 dark:border-gray-700 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
           <div className="text-lg font-semibold text-gray-900 dark:text-white">Daily Breakdown</div>
+          
+          {/* Items per page selector */}
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600 dark:text-gray-300">Show:</label>
+            <select
+              value={itemsPerPage}
+              onChange={(e) => handleItemsPerPageChange(Number(e.target.value))}
+              className="px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+            </select>
+            <span className="text-sm text-gray-600 dark:text-gray-300">entries</span>
+          </div>
         </div>
+        
         <div className="overflow-auto">
           <table className="min-w-full divide-y divide-gray-100 dark:divide-gray-700">
             <thead className="bg-gray-50 dark:bg-gray-900">
@@ -528,10 +568,10 @@ useEffect(() => {
               </tr>
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">
-              {chartData.barChartData.length === 0 && (
+              {paginatedData.length === 0 && (
                 <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-500 dark:text-gray-400">No data</td></tr>
               )}
-              {chartData.barChartData.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).map(row => (
+              {paginatedData.map(row => (
                 <tr key={`${row.date}`} className="hover:bg-gray-50 dark:hover:bg-gray-900/40">
                   <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{formatDate(row.date)}</td>
                   <td className="px-4 py-2 text-sm text-green-600">{row.success}</td>
@@ -543,6 +583,66 @@ useEffect(() => {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Controls */}
+        {sortedChartData.length > 0 && (
+          <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
+            <div className="text-sm text-gray-600 dark:text-gray-300">
+              Showing {startIndex + 1} to {Math.min(endIndex, sortedChartData.length)} of {sortedChartData.length} entries
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+                className="inline-flex items-center px-3 py-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" />
+                Previous
+              </button>
+              
+              {/* Page numbers */}
+              <div className="flex items-center gap-1">
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                  // Show first page, last page, current page, and pages around current page
+                  const showPage = page === 1 || page === totalPages || 
+                    (page >= currentPage - 1 && page <= currentPage + 1);
+                  
+                  if (!showPage) {
+                    // Show ellipsis
+                    if (page === currentPage - 2 || page === currentPage + 2) {
+                      return <span key={page} className="px-2 text-gray-500">...</span>;
+                    }
+                    return null;
+                  }
+                  
+                  return (
+                    <button
+                      key={page}
+                      onClick={() => handlePageChange(page)}
+                      className={`px-3 py-1 rounded-md text-sm ${
+                        page === currentPage
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  );
+                })}
+              </div>
+              
+              <button
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === totalPages}
+                className="inline-flex items-center px-3 py-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Recent Updates Table */}

@@ -24,6 +24,22 @@ function App() {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
+    const handleStorageChange = () => {
+      const storedUser = localStorage.getItem("user");
+      setUser(storedUser ? JSON.parse(storedUser) : null);
+    };
+  
+    // Run once at mount
+    handleStorageChange();
+  
+    // Listen for changes (including the manual dispatch in Login)
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
+
+
+  
+  useEffect(() => {
     // Check if user is authenticated (check localStorage for token)
     const token = localStorage.getItem('authToken');
     const userData = localStorage.getItem('user');

@@ -38,6 +38,9 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   const user = JSON.parse(localStorage.getItem('user'));
   
   // Fetch projects for dropdown (admin sees all, regular users see only assigned)
+
+
+  
   useEffect(() => {
     if (!showUploadModal) return;
     const fetchProjects = async () => {

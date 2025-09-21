@@ -31,6 +31,9 @@ const FirmwareManagement = () => {
   const PROJECTS_API = `${BACKEND_BASE_URL}/projects`;
 
 
+  
+
+
   const [userRole, setUserRole] = useState(null);
 
   useEffect(() => {
@@ -174,6 +177,14 @@ const FirmwareManagement = () => {
       formData.append('description', description);
       formData.append('esp_id', selectedDevice?.value);
       formData.append('file', file);
+
+      const versionExists = await checkVersionExists();
+      if (versionExists) {
+        setError("This firmware version already exists for the selected device.");
+        setLoading(false);
+        return;
+      }
+
       
       const response = await fetch(`${FIRMWARE_API}/upload`, {
         method: 'POST',
@@ -564,9 +575,7 @@ const FirmwareManagement = () => {
                   className="w-full pl-10 pr-3 py-2 border border-gray-200 dark:border-gray-700 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-400 focus:border-blue-400 text-sm"
                 />
               </div>
-              <button className="flex items-center gap-1 px-4 py-2 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 text-sm font-medium">
-                <FilterIcon className="h-4 w-4" /> Filter
-              </button>
+              
               <button
                 onClick={exportFirmwareData}
                 className="flex items-center gap-2 px-4 py-2 rounded-md bg-green-600 text-white font-semibold shadow hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-400 transition text-sm disabled:opacity-50"
@@ -588,7 +597,7 @@ const FirmwareManagement = () => {
             </div>
           </div>
           {/* Project and Device Selection */}
-          <div className="flex flex-col sm:flex-row gap-4 mb-6 px-8">
+          <div className="flex flex-col sm:flex-row gap-4 mb-6 px-8 mt-8">
             {/* Project Selection */}
             <Select
               className="min-w-[220px]"
@@ -621,17 +630,7 @@ const FirmwareManagement = () => {
             )}
           </div>
           
-          {/* Auto-selection Loading Indicator */}
-          {projects.length > 0 && (!selectedProject || (selectedProject && !selectedDeviceFilter)) && (
-            <div className="px-8 mb-4">
-              <div className="bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-                <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                  <span>Auto-selecting project and device...</span>
-                </div>
-              </div>
-            </div>
-          )}
+      
           
           {/* Filter Indicator */}
           {selectedProject && selectedDeviceFilter && (

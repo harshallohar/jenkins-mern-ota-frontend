@@ -7,6 +7,7 @@ import './react-select-tailwind.css';
 const DEVICES_API = `${BACKEND_BASE_URL}/devices`;
 const PROJECTS_API = `${BACKEND_BASE_URL}/projects`;
 const OTA_LIST_API = `${BACKEND_BASE_URL}/ota-updates`;
+const OTA_VERSIONS_API = `${BACKEND_BASE_URL}/ota-updates/versions`;
 
 function Badge({ badge, color, children }) {
   const base = 'px-2 py-0.5 rounded text-xs font-medium';
@@ -38,10 +39,11 @@ export default function OTAUpdates() {
 
   const [userRole, setUserRole] = useState(null);
 
-  // New UI states for badge filter + version search
+  // New UI states for badge filter + version dropdown
   const [badgeFilter, setBadgeFilter] = useState('all'); // 'all'|'success'|'failure'|'other'
-  const [versionInput, setVersionInput] = useState(''); // what user types
-  const [versionQuery, setVersionQuery] = useState(''); // applied query (set on Search)
+  const [availableVersions, setAvailableVersions] = useState([]);
+  const [selectedVersion, setSelectedVersion] = useState(null);
+  const [loadingVersions, setLoadingVersions] = useState(false);
 
   useEffect(() => {
     const storedUser = localStorage.getItem("user");
@@ -104,6 +106,51 @@ export default function OTAUpdates() {
       .map(d => ({ value: d.deviceId, label: `${d.name} (${d.deviceId})` }));
   }, [devices, selectedProject]);
 
+  // Fetch available versions when filters change
+  const fetchAvailableVersions = async () => {
+    if (badgeFilter === 'all') {
+      setAvailableVersions([]);
+      return;
+    }
+
+    setLoadingVersions(true);
+    try {
+      const params = new URLSearchParams();
+      if (selectedDevice) params.set('deviceId', selectedDevice.value);
+      if (selectedProject) params.set('projectId', selectedProject.value);
+      params.set('badge', badgeFilter);
+
+      const token = localStorage.getItem('authToken');
+      const versionsUrl = `${OTA_VERSIONS_API}?${params.toString()}`;
+      const versionsRes = await fetch(versionsUrl, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (!versionsRes.ok) throw new Error('Failed to load versions');
+      const versionsData = await versionsRes.json();
+      
+      if (versionsData.success) {
+        setAvailableVersions(versionsData.versions || []);
+      } else {
+        setAvailableVersions([]);
+      }
+    } catch (e) {
+      console.error('Error loading versions:', e);
+      setAvailableVersions([]);
+    } finally {
+      setLoadingVersions(false);
+    }
+  };
+
+  // Load versions when relevant filters change
+  useEffect(() => {
+    if (selectedProject && badgeFilter !== 'all') {
+      fetchAvailableVersions();
+    } else {
+      setAvailableVersions([]);
+      setSelectedVersion(null);
+    }
+  }, [selectedProject, selectedDevice, badgeFilter]);
   // filteredUpdates: page items after local device/project filter (still paginated)
   const filteredUpdates = useMemo(() => {
     // updates are already filtered server-side by device/project/badge/version for the page
@@ -122,7 +169,7 @@ export default function OTAUpdates() {
     return { success, failure, other, total };
   };
 
-  // fetchData: uses badgeFilter and versionQuery to request page + counts from server
+  // fetchData: uses badgeFilter and selectedVersion to request page + counts from server
   const fetchData = async (page = 1) => {
     setLoading(true);
     setError('');
@@ -134,7 +181,7 @@ export default function OTAUpdates() {
       if (selectedDevice) params.set('deviceId', selectedDevice.value);
       if (selectedProject) params.set('projectId', selectedProject.value);
       if (badgeFilter && badgeFilter !== 'all') params.set('badge', badgeFilter);
-      if (versionQuery && versionQuery.trim() !== '') params.set('versionQuery', versionQuery.trim());
+      if (selectedVersion && selectedVersion.value) params.set('versionQuery', selectedVersion.value);
 
       const token = localStorage.getItem('authToken');
       const listUrl = `${OTA_LIST_API}?${params.toString()}`;
@@ -178,23 +225,22 @@ export default function OTAUpdates() {
     }
   };
 
-  // On project/device change -> reload first page and clear version filters
+  // On project/device change -> reload first page and clear version selection
+  // Consolidated effect to handle all data fetching
   useEffect(() => {
-    setVersionInput('');
-    setVersionQuery('');
-    // Fetch first page
-    if (selectedProject) fetchData(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProject, selectedDevice]);
+    // Reset version selection when project, device, or badge filter changes
+    if (badgeFilter !== 'all') {
+      // Only reset version if we're changing project/device while badge filter is active
+      setSelectedVersion(null);
+    }
+    
+    // Fetch data when any of these dependencies change
+    if (selectedProject) {
+      fetchData(1);
+    }
+  }, [selectedProject, selectedDevice, badgeFilter, selectedVersion]);
 
-  // When badgeFilter changes -> clear versionInput & applied versionQuery and fetch
-  useEffect(() => {
-    setVersionInput('');
-    setVersionQuery('');
-    if (selectedProject) fetchData(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [badgeFilter]);
-
+  
   // Selection state for bulk delete
   const [selectedIds, setSelectedIds] = useState(new Set());
   const toggleSelected = (id) => {
@@ -342,20 +388,8 @@ export default function OTAUpdates() {
 
   // UI helpers: which version field based on badgeFilter
   const versionFieldLabel = () => {
-    if (badgeFilter === 'failure') return 'Search previous version';
-    return 'Search updated version';
-  };
-
-  const handleSearchApply = () => {
-    // apply typed input to versionQuery and fetch page 1
-    setVersionQuery(versionInput.trim());
-    fetchData(1);
-  };
-
-  const handleClearSearch = () => {
-    setVersionInput('');
-    setVersionQuery('');
-    fetchData(1);
+    if (badgeFilter === 'failure') return 'Filter by previous version';
+    return 'Filter by updated version';
   };
 
   return (
@@ -433,32 +467,27 @@ export default function OTAUpdates() {
             </div>
           </div>
 
-          {/* Version search row - Only shown when badge filter is not 'all' */}
+          {/* Version dropdown row - Only shown when badge filter is not 'all' */}
           {badgeFilter !== 'all' && (
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-              <div className="flex items-center gap-2 flex-1 max-w-md">
-                <input
-                  type="text"
-                  placeholder={versionFieldLabel()}
-                  value={versionInput}
-                  onChange={(e) => setVersionInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleSearchApply(); }}
-                  className="flex-1 rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
+              <div className="min-w-[300px] max-w-md">
+                <Select
+                  classNamePrefix="react-select"
+                  placeholder={loadingVersions ? 'Loading versions...' : versionFieldLabel()}
+                  options={availableVersions}
+                  value={selectedVersion}
+                  onChange={setSelectedVersion}
+                  isClearable
+                  isLoading={loadingVersions}
+                  isDisabled={loadingVersions || availableVersions.length === 0}
+                  noOptionsMessage={() => availableVersions.length === 0 ? 'No versions found' : 'No options'}
                 />
-                <button
-                  onClick={handleSearchApply}
-                  className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700 text-white text-sm transition-colors whitespace-nowrap"
-                >
-                  Search
-                </button>
-                <button
-                  onClick={handleClearSearch}
-                  disabled={!versionInput && !versionQuery}
-                  className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                >
-                  Clear
-                </button>
               </div>
+              {selectedVersion && (
+                <div className="text-sm text-gray-600 dark:text-gray-400">
+                  Filtering by: {selectedVersion.label}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -27,6 +27,9 @@ const Login = ({ setIsAuthenticated }) => {
       if (!res.ok) throw new Error(data.message || 'Login failed');
       localStorage.setItem('authToken', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
+
+      window.dispatchEvent(new Event("user-updated"));
+
       setIsAuthenticated(true);
     } catch (err) {
       setError(err.message);

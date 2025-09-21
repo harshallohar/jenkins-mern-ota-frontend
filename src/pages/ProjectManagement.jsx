@@ -205,15 +205,27 @@ const ProjectManagement = () => {
 
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this project?')) return;
+    
     setLoading(true);
     setError('');
+    
     try {
       const token = localStorage.getItem('authToken');
-      await fetch(`${PROJECT_API}/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      const response = await fetch(`${PROJECT_API}/${id}`, { 
+        method: 'DELETE', 
+        headers: { Authorization: `Bearer ${token}` } 
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to delete project');
+      }
+      
       // Only refresh essential data - no need to fetch OTA updates
       await fetchEssentialData();
     } catch (err) {
-      setError('Failed to delete project');
+      console.error('Delete error:', err);
+      setError(err.message || 'Failed to delete project');
+    } finally {
       setLoading(false);
     }
   };
@@ -222,31 +234,81 @@ const ProjectManagement = () => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    
     try {
       const token = localStorage.getItem('authToken');
+      let response;
+      
       if (modalMode === 'add') {
-        await fetch(PROJECT_API, {
+        response = await fetch(PROJECT_API, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ ...form, devices: selectedDevices.map(d => d.value) })
+          headers: { 
+            'Content-Type': 'application/json', 
+            Authorization: `Bearer ${token}` 
+          },
+          body: JSON.stringify({ 
+            ...form, 
+            devices: selectedDevices.map(d => d.value) 
+          })
         });
       } else if (modalMode === 'edit') {
-        await fetch(`${PROJECT_API}/${editId}`, {
+        response = await fetch(`${PROJECT_API}/${editId}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ ...form, devices: selectedDevices.map(d => d.value) })
+          headers: { 
+            'Content-Type': 'application/json', 
+            Authorization: `Bearer ${token}` 
+          },
+          body: JSON.stringify({ 
+            ...form, 
+            devices: selectedDevices.map(d => d.value) 
+          })
         });
       }
+      
+      if (!response.ok) {
+        throw new Error(`Failed to ${modalMode} project`);
+      }
+      
+      // Close modal and refresh data
       setModalOpen(false);
-      // Only refresh essential data
       await fetchEssentialData();
+      
     } catch (err) {
-      setError('Failed to save project');
+      console.error('Modal submit error:', err);
+      setError(err.message || 'Failed to save project');
+    } finally {
       setLoading(false);
     }
   };
 
-
+  // Get project statistics - only calculate when needed and OTA data is loaded
+  const getProjectStats = (project) => {
+    // Load OTA updates if needed for stats calculation
+    if (otaUpdates.length === 0) {
+      loadOTAUpdatesIfNeeded();
+    }
+    
+    const projectDevices = allDevices.filter(device => 
+      project.devices && project.devices.includes(device._id)
+    );
+    
+    const projectUpdates = otaUpdates.filter(update => 
+      projectDevices.some(device => device._id === update.device)
+    );
+    
+    const successCount = projectUpdates.filter(update => update.status === 'completed').length;
+    const failedCount = projectUpdates.filter(update => update.status === 'failed').length;
+    const totalUpdates = projectUpdates.length;
+    const successRate = totalUpdates > 0 ? Math.round((successCount / totalUpdates) * 100) : 0;
+    
+    return {
+      totalDevices: projectDevices.length,
+      totalUpdates,
+      successCount,
+      failedCount,
+      successRate
+    };
+  };
 
   // Export project data
   const exportProjectData = (project) => {
@@ -345,7 +407,7 @@ const ProjectManagement = () => {
                   <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
-          </div>
+                </div>
                 <input
                   type="text"
                   placeholder="Search projects by name or description..."
@@ -366,7 +428,7 @@ const ProjectManagement = () => {
                     className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium"
                   >
                     Clear search
-            </button>
+                  </button>
                 </div>
               )}
             </div>
@@ -447,18 +509,18 @@ const ProjectManagement = () => {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
                   <textarea name="projectDescription" value={form.projectDescription} onChange={e => setForm({ ...form, projectDescription: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white" rows={3} />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Assign Devices</label>
+                  <Select
+                    options={availableDevices.concat(allDevices.filter(d => selectedDevices.some(sd => sd.value === d._id && !availableDevices.some(ad => ad._id === d._id)))).map(d => ({ value: d._id, label: `${d.name} (${d.deviceId})` }))}
+                    value={selectedDevices}
+                    onChange={setSelectedDevices}
+                    isMulti
+                    isClearable
+                    placeholder="Select devices..."
+                  />
+                </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Assign Devices</label>
-                    <Select
-                      options={availableDevices.concat(allDevices.filter(d => selectedDevices.some(sd => sd.value === d._id && !availableDevices.some(ad => ad._id === d._id)))).map(d => ({ value: d._id, label: `${d.name} (${d.deviceId})` }))}
-                      value={selectedDevices}
-                      onChange={setSelectedDevices}
-                      isMulti
-                      isClearable
-                      placeholder="Select devices..."
-                    />
-                  </div>
                   <button type="button" onClick={() => setModalOpen(false)} className="px-4 py-2 rounded-md bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600">Cancel</button>
                   <button type="submit" className="px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700">{modalMode === 'add' ? 'Add' : 'Save'}</button>
                 </div>
@@ -475,25 +537,25 @@ const ProjectManagement = () => {
     <div className="space-y-6">
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-            <FolderOpen className="h-8 w-8 text-blue-600" />
-            My Projects
-          </h1>
-          <p className="mt-2 text-gray-600 dark:text-gray-400">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
+              <FolderOpen className="h-8 w-8 text-blue-600" />
+              My Projects
+            </h1>
+            <p className="mt-2 text-gray-600 dark:text-gray-400">
               Welcome back, {user.name}! Here are your assigned projects and devices.
-          </p>
-        </div>
-        
+            </p>
+          </div>
+          
           <div className="mt-4 sm:mt-0">
-          <button
-            onClick={refreshOTAUpdates}
-            disabled={refreshing}
+            <button
+              onClick={refreshOTAUpdates}
+              disabled={refreshing}
               className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Refresh Data"
-          >
-            {refreshing ? (
+              title="Refresh Data"
+            >
+              {refreshing ? (
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600 mr-2"></div>
               ) : (
                 <Activity className="h-4 w-4 mr-2" />
@@ -547,8 +609,8 @@ const ProjectManagement = () => {
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex-1">
                       <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                          {project.projectName}
-                        </h3>
+                        {project.projectName}
+                      </h3>
                       
                       <p className="text-gray-600 dark:text-gray-400 text-sm mb-4">
                         {project.projectDescription || 'No description provided'}
@@ -556,18 +618,18 @@ const ProjectManagement = () => {
                       
                       {/* Device Count */}
                       <div className="flex items-center gap-2 mb-4">
-                            <Smartphone className="h-4 w-4 text-gray-500" />
-                            <span className="text-sm text-gray-600 dark:text-gray-400">
+                        <Smartphone className="h-4 w-4 text-gray-500" />
+                        <span className="text-sm text-gray-600 dark:text-gray-400">
                           {projectDevices.length} Device{projectDevices.length !== 1 ? 's' : ''}
-                            </span>
-                        </div>
-                        
+                        </span>
+                      </div>
+                      
                       {/* Device List */}
                       {projectDevices.length > 0 && (
                         <div className="space-y-2">
                           <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Assigned Devices:</p>
                           <div className="grid grid-cols-1 gap-2">
-                          {projectDevices.map((device) => {
+                            {projectDevices.map((device) => {
                               // Try to find assignment date from user's project assignments
                               const userProjectAssignments = user.projectAssignments || [];
                               const assignment = userProjectAssignments.find(pa => 
@@ -575,18 +637,18 @@ const ProjectManagement = () => {
                               );
                               const assignmentDate = assignment ? assignment.assignedAt : device.dateAssigned || device.dateCreated;
                             
-                            return (
-                              <div 
-                                key={device._id} 
+                              return (
+                                <div 
+                                  key={device._id} 
                                   className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600"
                                 >
                                   <div className="p-2 bg-blue-100 dark:bg-blue-900/20 rounded-lg">
                                     <Smartphone className="h-4 w-4 text-blue-600" />
-                                    </div>
+                                  </div>
                                   <div className="flex-1">
                                     <h5 className="text-sm font-medium text-gray-900 dark:text-white">
-                                        {device.name}
-                                      </h5>
+                                      {device.name}
+                                    </h5>
                                     <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">
                                       {device.deviceId}
                                     </p>
@@ -596,10 +658,10 @@ const ProjectManagement = () => {
                                       </p>
                                     )}
                                   </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -719,4 +781,4 @@ const ProjectManagement = () => {
   );
 };
 
-export default ProjectManagement; 
+export default ProjectManagement;
