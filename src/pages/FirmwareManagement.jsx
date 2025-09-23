@@ -166,6 +166,26 @@ const FirmwareManagement = () => {
   const totalPages = Math.ceil(filteredFirmwares.length / PAGE_SIZE);
   const pagedFirmwares = filteredFirmwares.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+
+  const checkVersionExists = async (esp_id, version) => {
+    try {
+      const response = await fetch(
+        `${BACKEND_BASE_URL}/firmware/check-version?esp_id=${esp_id}&version=${version}`
+      );      
+
+      if (!response.ok) {
+        throw new Error("Failed to check version");
+      }
+
+      const data = await response.json();
+      return data.exists; // true / false
+    } catch (err) {
+      console.error("Error checking version:", err);
+      return false; // fallback
+    }
+  };
+  
+
   // Upload firmware
   const handleUpload = async (e) => {
     e.preventDefault();
@@ -178,7 +198,8 @@ const FirmwareManagement = () => {
       formData.append('esp_id', selectedDevice?.value);
       formData.append('file', file);
 
-      const versionExists = await checkVersionExists();
+
+      const versionExists = await checkVersionExists(selectedDevice?.value, version);
       if (versionExists) {
         setError("This firmware version already exists for the selected device.");
         setLoading(false);
@@ -209,7 +230,6 @@ const FirmwareManagement = () => {
       setLoading(false);
     }
   };
-
   // Open upload modal with pre-selected project and device
   const openUploadModal = () => {
     // Pre-populate with current selections
