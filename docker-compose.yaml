@@ -1,37 +1,12 @@
 version: '3.8'
 
 services:
-  # FRONTEND (Node app)
   frontend:
     build:
       context: .
-    container_name: my-frontend-v2
-    restart: always
-    expose:
-      - "3000"       # internal only, no ports to host
-    environment:
-      - NODE_ENV=production
-
-  # NGINX reverse proxy + SSL
-  nginx:
-    image: nginx:latest
-    container_name: nginx
-    restart: always
-    depends_on:
-      - frontend
     ports:
       - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx:/etc/nginx/conf.d
-      - ./certbot/conf:/etc/letsencrypt
-      - ./certbot/www:/var/www/certbot
-
-  # CERTBOT for Let's Encrypt
-  certbot:
-    image: certbot/certbot
-    container_name: certbot
-    volumes:
-      - ./certbot/conf:/etc/letsencrypt
-      - ./certbot/www:/var/www/certbot
-    command: certonly --webroot --webroot-path=/var/www/certbot --email your@email.com --agree-tos --no-eff-email -d ota.aproposdrive.com
+    container_name: my-frontend-v2
+    restart: always
+    environment:
+      - NODE_ENV=production
