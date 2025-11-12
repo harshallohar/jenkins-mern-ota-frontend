@@ -1,14 +1,14 @@
 version: '3.8'
 
 services:
-  # Your existing frontend container
+  # FRONTEND (Node app)
   frontend:
     build:
       context: .
     container_name: my-frontend-v2
     restart: always
-    ports:
-      - "3000:3000"     # Node server inside container runs here (adjust if different)
+    expose:
+      - "3000"       # internal only, no ports to host
     environment:
       - NODE_ENV=production
 
@@ -34,4 +34,4 @@ services:
     volumes:
       - ./certbot/conf:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
-    command: certonly --webroot --webroot-path=/var/www/certbot --harshalloharapt@gmail.com --agree-tos --no-eff-email -d ota.aproposdrive.com
+    command: certonly --webroot --webroot-path=/var/www/certbot --email your@email.com --agree-tos --no-eff-email -d ota.aproposdrive.com
