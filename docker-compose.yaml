@@ -1,12 +1,37 @@
 version: '3.8'
 
 services:
+  # Your existing frontend container
   frontend:
     build:
       context: .
-    ports:
-      - "80:80"
     container_name: my-frontend-v2
     restart: always
+    ports:
+      - "3000:3000"     # Node server inside container runs here (adjust if different)
     environment:
-      - NODE_ENV=production  this is m my docker-composefile 
+      - NODE_ENV=production
+
+  # NGINX reverse proxy + SSL
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    restart: always
+    depends_on:
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+
+  # CERTBOT for Let's Encrypt
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    command: certonly --webroot --webroot-path=/var/www/certbot --harshalloharapt@gmail.com --agree-tos --no-eff-email -d ota.aproposdrive.com
