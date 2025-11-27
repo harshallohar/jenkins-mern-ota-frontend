@@ -317,7 +317,7 @@ useEffect(() => {
 
       const rows = json.data.rows || [];
       const detailHeaders = [
-        'Date','Device ID','Outcome','PIC ID','Previous Version','Updated Version','Timestamp (ISO)'
+        'Date','Device ID','Outcome','PIC ID','Previous Version','Updated Version','Recovered','Timestamp (ISO)'
       ];
       const summaryRows = [
         ['Dashboard Export Summary'],[''],
@@ -334,7 +334,14 @@ useEffect(() => {
       ];
 
       const detailRows = rows.map(r => [
-        r.date, r.deviceId, r.outcome, r.picID || '', r.previousVersion || '', r.updatedVersion || '', r.timestamp || ''
+        r.date,
+        r.deviceId,
+        r.outcome,
+        r.picID || '',
+        r.previousVersion || '',
+        r.updatedVersion || '',
+        typeof r.recovered === 'boolean' ? (r.recovered ? 'Yes' : 'No') : '',
+        r.timestamp || ''
       ]);
 
       const allRows = [...summaryRows, ...detailRows];

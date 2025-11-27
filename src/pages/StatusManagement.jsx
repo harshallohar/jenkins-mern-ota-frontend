@@ -151,6 +151,17 @@ const StatusManagement = () => {
       return;
     }
 
+    if (!isBasedOnOtherDevice) {
+      const normalizedCodes = statusCodes
+        .map(code => (code?.code !== undefined && code?.code !== null) ? code.code.toString().trim() : '')
+        .filter(Boolean);
+      const duplicateCode = normalizedCodes.find((code, index) => normalizedCodes.indexOf(code) !== index);
+      if (duplicateCode) {
+        setError(`Status code ${duplicateCode} already exists for this device`);
+        return;
+      }
+    }
+
     try {
       const token = localStorage.getItem('authToken');
       const payload = {

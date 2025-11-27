@@ -144,13 +144,26 @@ export default function OTAUpdates() {
 
   // Load versions when relevant filters change
   useEffect(() => {
-    if (selectedProject && badgeFilter !== 'all') {
-      fetchAvailableVersions();
-    } else {
+    if (!selectedProject) {
       setAvailableVersions([]);
       setSelectedVersion(null);
+      return;
     }
+
+    if (badgeFilter === 'all') {
+      setAvailableVersions([]);
+      setSelectedVersion(null);
+      return;
+    }
+
+    fetchAvailableVersions();
   }, [selectedProject, selectedDevice, badgeFilter]);
+
+  // Reset version filter when project/device/badge changes
+  useEffect(() => {
+    setSelectedVersion(null);
+  }, [selectedProject, selectedDevice, badgeFilter]);
+
   // filteredUpdates: page items after local device/project filter (still paginated)
   const filteredUpdates = useMemo(() => {
     // updates are already filtered server-side by device/project/badge/version for the page
@@ -225,16 +238,8 @@ export default function OTAUpdates() {
     }
   };
 
-  // On project/device change -> reload first page and clear version selection
-  // Consolidated effect to handle all data fetching
+  // Fetch data when filters change
   useEffect(() => {
-    // Reset version selection when project, device, or badge filter changes
-    if (badgeFilter !== 'all') {
-      // Only reset version if we're changing project/device while badge filter is active
-      setSelectedVersion(null);
-    }
-    
-    // Fetch data when any of these dependencies change
     if (selectedProject) {
       fetchData(1);
     }
@@ -303,7 +308,7 @@ export default function OTAUpdates() {
       }
 
       const headers = [
-        'Timestamp','PIC ID','Device ID','Device Name','Project','Previous Version','Updated Version','Status','Status Message','Badge','Color'
+        'Timestamp','PIC ID','Device ID','Device Name','Project','Previous Version','Updated Version','Status','Status Message','Badge','Color','Reprogramming'
       ];
 
       const rows = exportData.map(update => [
@@ -317,7 +322,10 @@ export default function OTAUpdates() {
         update.status,
         update.statusMessage || '',
         update.badge,
-        update.color || ''
+        update.color || '',
+        typeof update.reprogramming === 'boolean'
+          ? (update.reprogramming ? 'Yes' : 'No')
+          : (update.reprogramming === '1' ? 'Yes' : update.reprogramming === '0' ? 'No' : '')
       ]);
 
       const summaryRows = [
@@ -543,6 +551,7 @@ export default function OTAUpdates() {
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">PIC ID</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Device</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">From → To</th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Reprogramming</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Timestamp</th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
@@ -551,7 +560,7 @@ export default function OTAUpdates() {
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">
               {filteredUpdates.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-gray-500 dark:text-gray-400">
+                  <td colSpan={8} className="px-4 py-6 text-center text-gray-500 dark:text-gray-400">
                     {loading ? 'Loading...' : 'No updates found'}
                   </td>
                 </tr>
@@ -574,6 +583,11 @@ export default function OTAUpdates() {
                   </td>
                   <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">
                     {update.previousVersion} → {update.updatedVersion}
+                  </td>
+                  <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">
+                    {typeof update.reprogramming === 'boolean'
+                      ? (update.reprogramming ? 'Yes' : 'No')
+                      : (update.reprogramming === '1' ? 'Yes' : update.reprogramming === '0' ? 'No' : '-')}
                   </td>
                   <td className="px-4 py-2 text-sm">
                     <Badge badge={update.badge} color={update.color}>
