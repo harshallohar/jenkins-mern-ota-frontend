@@ -111,14 +111,14 @@ const DeviceManagement = () => {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this device?')) return;
+    if (!window.confirm('Delete this device? This will permanently delete all associated OTA updates and dashboard statistics.')) return;
     setLoading(true);
     setError('');
     try {
       const token = localStorage.getItem('authToken');
       const res = await fetch(`${API_URL}/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) {
-        const errJson = await res.json().catch(()=>null);
+        const errJson = await res.json().catch(() => null);
         throw new Error(errJson?.message || res.statusText || 'Delete failed');
       }
       await fetchDevices();
@@ -131,6 +131,16 @@ const DeviceManagement = () => {
 
   const handleModalSubmit = async (e) => {
     e.preventDefault();
+
+    if (modalMode === 'edit') {
+      const originalDevice = devices.find(d => (d._id || d.id) === editId);
+      if (originalDevice && originalDevice.deviceId !== form.deviceId) {
+        if (!window.confirm('Changing the Device ID will permanently delete all associated OTA updates and dashboard statistics. Are you sure you want to proceed?')) {
+          return;
+        }
+      }
+    }
+
     setSubmitting(true);
     setError('');
     const user = JSON.parse(localStorage.getItem('user') || 'null');
@@ -158,7 +168,7 @@ const DeviceManagement = () => {
 
         if (!deviceRes.ok) {
           // try to parse error message
-          const errJson = await deviceRes.json().catch(()=>null);
+          const errJson = await deviceRes.json().catch(() => null);
           throw new Error(errJson?.message || deviceRes.statusText || 'Failed to create device');
         }
 
@@ -176,7 +186,7 @@ const DeviceManagement = () => {
               body: JSON.stringify({ projectId: selectedProject.value })
             });
             if (!assignRes.ok) {
-              const errJson = await assignRes.json().catch(()=>null);
+              const errJson = await assignRes.json().catch(() => null);
               console.warn('assign-project failed:', errJson || assignRes.statusText);
               // not throwing here — assignment failure isn't as critical as creation
             }
@@ -196,7 +206,7 @@ const DeviceManagement = () => {
         });
 
         if (!updateRes.ok) {
-          const errJson = await updateRes.json().catch(()=>null);
+          const errJson = await updateRes.json().catch(() => null);
           throw new Error(errJson?.message || updateRes.statusText || 'Failed to update device');
         }
 
@@ -209,7 +219,7 @@ const DeviceManagement = () => {
               body: JSON.stringify({ projectId: selectedProject.value })
             });
             if (!assignRes.ok) {
-              const errJson = await assignRes.json().catch(()=>null);
+              const errJson = await assignRes.json().catch(() => null);
               console.warn('assign-project failed:', errJson || assignRes.statusText);
             }
           } else {
