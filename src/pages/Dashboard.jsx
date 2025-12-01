@@ -30,17 +30,17 @@ export default function Dashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
-useEffect(() => {
-  const storedUser = localStorage.getItem("user");
-  if (storedUser) {
-    try {
-      const parsed = JSON.parse(storedUser);
-      setUserRole(parsed.role);
-    } catch {}
-  }
-}, []);
+  useEffect(() => {
+    const storedUser = localStorage.getItem("user");
+    if (storedUser) {
+      try {
+        const parsed = JSON.parse(storedUser);
+        setUserRole(parsed.role);
+      } catch { }
+    }
+  }, []);
 
-  
+
   const getTodayDateString = () => {
     const today = new Date();
     const year = today.getFullYear();
@@ -48,7 +48,7 @@ useEffect(() => {
     const day = String(today.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   };
-  
+
   const getStartDateForRange = (days) => {
     const n = parseInt(days, 10);
     if (isNaN(n) || n <= 0) return getTodayDateString();
@@ -63,7 +63,7 @@ useEffect(() => {
 
   const [startDateInput, setStartDateInput] = useState(getTodayDateString());
   const [endDateInput, setEndDateInput] = useState(getTodayDateString());
-  
+
   const [chartData, setChartData] = useState({
     barChartData: [],
     pieChartData: [],
@@ -91,24 +91,29 @@ useEffect(() => {
   }, []);
 
   useEffect(() => {
-    if (!selectedProject && projects.length > 0) {
-      const first = projects[0];
-      setSelectedProject({ value: first._id, label: first.projectName });
+    if (!selectedProject && projects.length > 0 && devices.length > 0) {
+      // Only auto-select projects that have devices
+      const projectsWithDevices = projects.filter(p => devices.some(d => d.project === p._id));
+      if (projectsWithDevices.length > 0) {
+        const first = projectsWithDevices[0];
+        setSelectedProject({ value: first._id, label: first.projectName });
+      }
     }
-  }, [projects, selectedProject]);
+  }, [projects, devices, selectedProject]);
 
   useEffect(() => {
-    if (!selectedProject || devices.length === 0) return;
+    if (!selectedProject || devices.length === 0) {
+      setSelectedDevice(null);
+      return;
+    }
     const projectDevices = devices.filter(d => d.project === selectedProject.value);
     if (projectDevices.length === 0) {
       setSelectedDevice(null);
       return;
     }
-    const isCurrentValid = selectedDevice && projectDevices.some(d => d.deviceId === selectedDevice.value);
-    if (!isCurrentValid) {
-      const d0 = projectDevices[0];
-      setSelectedDevice({ value: d0.deviceId, label: `${d0.name} (${d0.deviceId})` });
-    }
+    // Auto-select the first device of the selected project
+    const d0 = projectDevices[0];
+    setSelectedDevice({ value: d0.deviceId, label: `${d0.name} (${d0.deviceId})` });
   }, [selectedProject, devices]);
 
   useEffect(() => {
@@ -116,7 +121,12 @@ useEffect(() => {
     setEndDateInput(getTodayDateString());
   }, []);
 
-  const projectOptions = useMemo(() => projects.map(p => ({ value: p._id, label: p.projectName })), [projects]);
+  const projectOptions = useMemo(() => {
+    // Only show projects that have at least one device
+    return projects
+      .filter(p => devices.some(d => d.project === p._id))
+      .map(p => ({ value: p._id, label: p.projectName }));
+  }, [projects, devices]);
   const deviceOptions = useMemo(() => {
     if (!selectedProject) return [];
     return devices
@@ -317,10 +327,10 @@ useEffect(() => {
 
       const rows = json.data.rows || [];
       const detailHeaders = [
-        'Date','Device ID','Outcome','PIC ID','Previous Version','Updated Version','Recovered','Timestamp (ISO)'
+        'Date', 'Device ID', 'Outcome', 'PIC ID', 'Previous Version', 'Updated Version', 'Recovered', 'Timestamp (ISO)'
       ];
       const summaryRows = [
-        ['Dashboard Export Summary'],[''],
+        ['Dashboard Export Summary'], [''],
         ['Export Date', new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' })],
         ['Export Time', new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })],
         ['Time Range', customMode ? `${startDateInput} to ${endDateInput}` : `Last ${range} days (${getStartDateForRange(range)} to ${getTodayDateString()})`],
@@ -330,7 +340,7 @@ useEffect(() => {
         ['Total Failure', chartData.totalCounts.failure],
         ['Total Other', chartData.totalCounts.other],
         ['Total Updates', chartData.totalCounts.total],
-        [''],['Detailed Records'],[''], detailHeaders
+        [''], ['Detailed Records'], [''], detailHeaders
       ];
 
       const detailRows = rows.map(r => [
@@ -433,7 +443,7 @@ useEffect(() => {
 
   return (
     <div className="p-4 md:p-6 space-y-6">
-      
+
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-4 shadow-sm">
         <div className="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
           <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
@@ -443,7 +453,7 @@ useEffect(() => {
                 placeholder="Select Project"
                 options={projectOptions}
                 value={selectedProject}
-                onChange={(v) => { setSelectedProject(v); setSelectedDevice(null); }}
+                onChange={setSelectedProject}
                 isClearable
               />
             </div>
@@ -459,9 +469,9 @@ useEffect(() => {
               />
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => handleQuickRange('7')} className={`px-3 py-2 rounded-full text-sm ${!customMode && range==='7' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'}`}>7d</button>
-              <button onClick={() => handleQuickRange('30')} className={`px-3 py-2 rounded-full text-sm ${!customMode && range==='30' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'}`}>30d</button>
-              <button onClick={() => handleQuickRange('90')} className={`px-3 py-2 rounded-full text-sm ${!customMode && range==='90' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'}`}>90d</button>
+              <button onClick={() => handleQuickRange('7')} className={`px-3 py-2 rounded-full text-sm ${!customMode && range === '7' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'}`}>7d</button>
+              <button onClick={() => handleQuickRange('30')} className={`px-3 py-2 rounded-full text-sm ${!customMode && range === '30' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'}`}>30d</button>
+              <button onClick={() => handleQuickRange('90')} className={`px-3 py-2 rounded-full text-sm ${!customMode && range === '90' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'}`}>90d</button>
               <button onClick={handleUseCustom} className={`px-3 py-2 rounded-full text-sm ${customMode ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'}`}>Custom</button>
             </div>
             {customMode && (
@@ -474,20 +484,20 @@ useEffect(() => {
           </div>
 
           <div className="flex items-center gap-2">
-          <button onClick={fetchChartData} className="inline-flex items-center px-3 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm">
-            <RefreshCw className="h-4 w-4 mr-2" /> Refresh
-          </button>
-
-          <button onClick={exportCSV} disabled={loading} className="inline-flex items-center px-3 py-2 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
-            <DownloadIcon className="h-4 w-4 mr-2" /> {loading ? 'Exporting...' : 'Export CSV'}
-          </button>
-
-          {userRole === "admin" && (
-            <button onClick={deleteData} disabled={loading} className="inline-flex items-center px-3 py-2 rounded-md bg-red-600 hover:bg-red-700 text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed">
-              <Trash2 className="h-4 w-4 mr-2" /> {loading ? 'Deleting...' : 'Delete'}
+            <button onClick={fetchChartData} className="inline-flex items-center px-3 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm">
+              <RefreshCw className="h-4 w-4 mr-2" /> Refresh
             </button>
-          )}
-        </div>
+
+            <button onClick={exportCSV} disabled={loading} className="inline-flex items-center px-3 py-2 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+              <DownloadIcon className="h-4 w-4 mr-2" /> {loading ? 'Exporting...' : 'Export CSV'}
+            </button>
+
+            {userRole === "admin" && (
+              <button onClick={deleteData} disabled={loading} className="inline-flex items-center px-3 py-2 rounded-md bg-red-600 hover:bg-red-700 text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                <Trash2 className="h-4 w-4 mr-2" /> {loading ? 'Deleting...' : 'Delete'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -516,9 +526,9 @@ useEffect(() => {
                 <YAxis stroke="#9CA3AF" allowDecimals={false} />
                 <Tooltip labelFormatter={(label) => `Date: ${label}`} formatter={(value, name) => [value, name]} />
                 <Legend />
-                <Bar dataKey="success" fill="#16a34a" name="Success" radius={[4,4,0,0]} />
-                <Bar dataKey="failure" fill="#dc2626" name="Failure" radius={[4,4,0,0]} />
-                <Bar dataKey="other" fill="#f59e0b" name="Other" radius={[4,4,0,0]} />
+                <Bar dataKey="success" fill="#16a34a" name="Success" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="failure" fill="#dc2626" name="Failure" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="other" fill="#f59e0b" name="Other" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -545,7 +555,7 @@ useEffect(() => {
       <div className="mt-6 bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-100 dark:border-gray-700 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
           <div className="text-lg font-semibold text-gray-900 dark:text-white">Daily Breakdown</div>
-          
+
           {/* Items per page selector */}
           <div className="flex items-center gap-2">
             <label className="text-sm text-gray-600 dark:text-gray-300">Show:</label>
@@ -562,7 +572,7 @@ useEffect(() => {
             <span className="text-sm text-gray-600 dark:text-gray-300">entries</span>
           </div>
         </div>
-        
+
         <div className="overflow-auto">
           <table className="min-w-full divide-y divide-gray-100 dark:divide-gray-700">
             <thead className="bg-gray-50 dark:bg-gray-900">
@@ -597,7 +607,7 @@ useEffect(() => {
             <div className="text-sm text-gray-600 dark:text-gray-300">
               Showing {startIndex + 1} to {Math.min(endIndex, sortedChartData.length)} of {sortedChartData.length} entries
             </div>
-            
+
             <div className="flex items-center gap-2">
               <button
                 onClick={() => handlePageChange(currentPage - 1)}
@@ -607,14 +617,14 @@ useEffect(() => {
                 <ChevronLeft className="h-4 w-4 mr-1" />
                 Previous
               </button>
-              
+
               {/* Page numbers */}
               <div className="flex items-center gap-1">
                 {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
                   // Show first page, last page, current page, and pages around current page
-                  const showPage = page === 1 || page === totalPages || 
+                  const showPage = page === 1 || page === totalPages ||
                     (page >= currentPage - 1 && page <= currentPage + 1);
-                  
+
                   if (!showPage) {
                     // Show ellipsis
                     if (page === currentPage - 2 || page === currentPage + 2) {
@@ -622,23 +632,22 @@ useEffect(() => {
                     }
                     return null;
                   }
-                  
+
                   return (
                     <button
                       key={page}
                       onClick={() => handlePageChange(page)}
-                      className={`px-3 py-1 rounded-md text-sm ${
-                        page === currentPage
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-                      }`}
+                      className={`px-3 py-1 rounded-md text-sm ${page === currentPage
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                        }`}
                     >
                       {page}
                     </button>
                   );
                 })}
               </div>
-              
+
               <button
                 onClick={() => handlePageChange(currentPage + 1)}
                 disabled={currentPage === totalPages}
@@ -676,16 +685,15 @@ useEffect(() => {
               {recentUpdates.map(update => (
                 <tr key={`${update.pic_id}-${update.timestamp}`} className="hover:bg-gray-50 dark:hover:bg-gray-900/40">
                   <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{new Date(update.timestamp).toLocaleString()}</td>
-                  <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100 font-mono text-xs">{update.pic_id?.substring(0,8)}...</td>
+                  <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100 font-mono text-xs">{update.pic_id?.substring(0, 8)}...</td>
                   <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100 font-mono text-xs">{update.deviceId}</td>
                   <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{update.previousVersion} → {update.updatedVersion}</td>
                   <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{update.statusMessage}</td>
                   <td className="px-4 py-2 text-sm">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      update.badge === 'success' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${update.badge === 'success' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
                       : update.badge === 'failure' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                      : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
-                    }`}>{update.badge}</span>
+                        : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
+                      }`}>{update.badge}</span>
                   </td>
                 </tr>
               ))}
