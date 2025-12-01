@@ -28,17 +28,17 @@ function App() {
       const storedUser = localStorage.getItem("user");
       setUser(storedUser ? JSON.parse(storedUser) : null);
     };
-  
+
     // Run once at mount
     handleStorageChange();
-  
+
     // Listen for changes (including the manual dispatch in Login)
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
 
-  
+
   useEffect(() => {
     // Check if user is authenticated (check localStorage for token)
     const token = localStorage.getItem('authToken');
@@ -46,12 +46,25 @@ function App() {
     if (token && userData) {
       setIsAuthenticated(true);
       setUser(JSON.parse(userData));
+    } else {
+      setIsAuthenticated(false);
+      setUser(null);
     }
     setIsLoading(false);
   }, []);
 
+  // Also update user state when isAuthenticated changes (e.g., after login)
+  useEffect(() => {
+    if (isAuthenticated) {
+      const userData = localStorage.getItem('user');
+      if (userData) {
+        setUser(JSON.parse(userData));
+      }
+    }
+  }, [isAuthenticated]);
+
   if (isLoading) {
-  return (
+    return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
       </div>
@@ -91,7 +104,7 @@ function App() {
               )
             } />
           </Routes>
-      </div>
+        </div>
       </Router>
     </ThemeProvider>
   );
