@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
-import { 
-  Plus, 
-  Edit, 
-  Trash2, 
-  Copy, 
-  Check, 
-  X, 
+import {
+  Plus,
+  Edit,
+  Trash2,
+  Copy,
+  Check,
+  X,
   AlertCircle,
   Info,
   Settings,
@@ -135,31 +135,25 @@ const StatusManagement = () => {
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!selectedDevice) {
       setError('Please select a device');
       return;
     }
 
-    if (!isBasedOnOtherDevice && statusCodes.length === 0) {
-      setError('Please add at least one status code');
+    if (statusCodes.length === 0) {
+      setError('Please add at least one status code or copy from a device');
       return;
     }
 
-    if (isBasedOnOtherDevice && !baseDevice) {
-      setError('Please select a base device');
+    // Check for duplicate codes
+    const normalizedCodes = statusCodes
+      .map(code => (code?.code !== undefined && code?.code !== null) ? code.code.toString().trim() : '')
+      .filter(Boolean);
+    const duplicateCode = normalizedCodes.find((code, index) => normalizedCodes.indexOf(code) !== index);
+    if (duplicateCode) {
+      setError(`Status code ${duplicateCode} already exists for this device`);
       return;
-    }
-
-    if (!isBasedOnOtherDevice) {
-      const normalizedCodes = statusCodes
-        .map(code => (code?.code !== undefined && code?.code !== null) ? code.code.toString().trim() : '')
-        .filter(Boolean);
-      const duplicateCode = normalizedCodes.find((code, index) => normalizedCodes.indexOf(code) !== index);
-      if (duplicateCode) {
-        setError(`Status code ${duplicateCode} already exists for this device`);
-        return;
-      }
     }
 
     try {
@@ -167,16 +161,16 @@ const StatusManagement = () => {
       const payload = {
         deviceId: selectedDevice.value,
         deviceName: selectedDevice.label,
-        statusCodes: isBasedOnOtherDevice ? [] : statusCodes,
-        isBasedOnOtherDevice,
-        baseDeviceId: isBasedOnOtherDevice ? baseDevice.value : null,
-        baseDeviceName: isBasedOnOtherDevice ? baseDevice.label : null
+        statusCodes: statusCodes,
+        isBasedOnOtherDevice: false,
+        baseDeviceId: null,
+        baseDeviceName: null
       };
 
-      const url = editingEntry 
+      const url = editingEntry
         ? `${BACKEND_BASE_URL}/status-management/${editingEntry._id}`
         : `${BACKEND_BASE_URL}/status-management`;
-      
+
       const method = editingEntry ? 'PUT' : 'POST';
 
       const response = await fetch(url, {
@@ -197,7 +191,7 @@ const StatusManagement = () => {
       setShowModal(false);
       resetForm();
       fetchStatusEntries();
-      
+
       setTimeout(() => setSuccess(''), 3000);
     } catch (error) {
       setError(error.message);
@@ -214,10 +208,6 @@ const StatusManagement = () => {
       color: code.color || '#6B7280'
     }));
     setStatusCodes(statusCodesWithColors);
-    setIsBasedOnOtherDevice(entry.isBasedOnOtherDevice);
-    if (entry.isBasedOnOtherDevice) {
-      setBaseDevice({ value: entry.baseDeviceId, label: entry.baseDeviceName });
-    }
     setShowModal(true);
   };
 
@@ -275,7 +265,7 @@ const StatusManagement = () => {
       setSelectedDevice(null);
       setSourceDevice(null);
       fetchStatusEntries();
-      
+
       setTimeout(() => setSuccess(''), 3000);
     } catch (error) {
       setError(error.message);
@@ -314,12 +304,12 @@ const StatusManagement = () => {
   // Filter status entries based on search term
   const filteredStatusEntries = useMemo(() => {
     if (!searchTerm.trim()) return statusEntries;
-    
+
     const searchLower = searchTerm.toLowerCase();
-    return statusEntries.filter(entry => 
+    return statusEntries.filter(entry =>
       entry.deviceName?.toLowerCase().includes(searchLower) ||
       entry.deviceId?.toLowerCase().includes(searchLower) ||
-      entry.statusCodes?.some(code => 
+      entry.statusCodes?.some(code =>
         code.message?.toLowerCase().includes(searchLower) ||
         code.code?.toString().includes(searchLower)
       )
@@ -379,7 +369,7 @@ const StatusManagement = () => {
               </div>
             )}
           </div>
-          
+
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-3">
             <button
@@ -395,13 +385,7 @@ const StatusManagement = () => {
               )}
               Refresh
             </button>
-            <button
-              onClick={() => setShowCopyModal(true)}
-              className="inline-flex items-center justify-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
-            >
-              <Copy className="h-4 w-4 mr-2" />
-              Copy Status Codes
-            </button>
+
             <button
               onClick={() => setShowModal(true)}
               className="inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
@@ -465,7 +449,7 @@ const StatusManagement = () => {
                 <Plus className="h-4 w-4 mr-2" />
                 Add First Status
               </button>
-                                 </div>
+            </div>
           </div>
         ) : filteredStatusEntries.length === 0 && searchTerm ? (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 text-center py-12">
@@ -477,13 +461,13 @@ const StatusManagement = () => {
               No devices found matching "{searchTerm}". Try adjusting your search terms.
             </p>
             <div className="mt-6">
-                                   <button
+              <button
                 onClick={() => setSearchTerm('')}
                 className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                                   >
+              >
                 Clear Search
-                                   </button>
-                         </div>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="grid gap-6">
@@ -508,13 +492,12 @@ const StatusManagement = () => {
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        entry.badgeType === 'Custom' 
-                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                          : 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300'
-                      }`}>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${entry.badgeType === 'Custom'
+                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                        : 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300'
+                        }`}>
                         {entry.badgeType}
-                        </span>
+                      </span>
                       <div className="flex items-center space-x-2">
                         <button
                           onClick={() => handleEdit(entry)}
@@ -532,7 +515,7 @@ const StatusManagement = () => {
                         </button>
                       </div>
                     </div>
-        </div>
+                  </div>
                 </div>
 
                 {/* Status Codes Content */}
@@ -548,7 +531,7 @@ const StatusManagement = () => {
                         {entry.statusCodes?.map((code, index) => (
                           <div key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900/50 rounded-lg">
                             <div className="flex items-center space-x-3">
-                              <div 
+                              <div
                                 className="w-3 h-3 rounded-full flex-shrink-0"
                                 style={{ backgroundColor: code.color || '#6B7280' }}
                               ></div>
@@ -558,13 +541,12 @@ const StatusManagement = () => {
                                 </span>
                               </div>
                             </div>
-                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                              code.badge === 'success' 
-                                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                                : code.badge === 'failure'
+                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${code.badge === 'success'
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                              : code.badge === 'failure'
                                 ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
                                 : 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300'
-                            }`}>
+                              }`}>
                               {code.badge}
                             </span>
                           </div>
@@ -636,8 +618,10 @@ const StatusManagement = () => {
                   <Select
                     value={selectedDevice}
                     onChange={setSelectedDevice}
-                    options={getDeviceOptions().filter(device => 
-                      !editingEntry || device.value === editingEntry.deviceId
+                    options={getDeviceOptions().filter(device =>
+                      editingEntry
+                        ? device.value === editingEntry.deviceId
+                        : !device.hasStatusManagement
                     )}
                     placeholder="Select a device..."
                     isDisabled={!!editingEntry}
@@ -646,113 +630,121 @@ const StatusManagement = () => {
                   />
                 </div>
 
-                {/* Based on Other Device */}
-                <div className="flex items-center space-x-3">
-                  <input
-                    type="checkbox"
-                    id="basedOnOther"
-                    checked={isBasedOnOtherDevice}
-                    onChange={(e) => setIsBasedOnOtherDevice(e.target.checked)}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="basedOnOther" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Use status codes from another device
-                  </label>
-                </div>
-
-                                 {/* Base Device Selection */}
-                 {isBasedOnOtherDevice && (
-                   <div>
-                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                       Base Device
-                     </label>
-                     {getSourceDeviceOptions().length === 0 ? (
-                       <div className="text-sm text-gray-500 dark:text-gray-400 p-3 border border-gray-200 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700">
-                         No devices with status management found. Please create status management for at least one device first.
-                       </div>
-                     ) : (
-                       <Select
-                         value={baseDevice}
-                         onChange={setBaseDevice}
-                         options={getSourceDeviceOptions()}
-                         placeholder="Select a base device..."
-                         className="react-select-container"
-                         classNamePrefix="react-select"
-                       />
-                     )}
-                   </div>
-                 )}
-
-                {/* Custom Status Codes */}
-                {!isBasedOnOtherDevice && (
+                {/* Copy from Device - Only show in Add mode, not Edit */}
+                {!editingEntry && (
                   <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Status Codes
-                      </label>
-                      <button
-                        type="button"
-                        onClick={addStatusCode}
-                        className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                      >
-                        <Plus className="h-3 w-3 mr-1" />
-                        Add Code
-                      </button>
-                    </div>
-                    
-                                         <div className="space-y-3">
-                       {statusCodes.map((code, index) => (
-                         <div key={index} className="flex space-x-3 p-3 border border-gray-200 dark:border-gray-600 rounded-md">
-                           <div className="flex-1">
-                             <input
-                               type="number"
-                               placeholder="Code"
-                               value={code.code}
-                               onChange={(e) => updateStatusCode(index, 'code', e.target.value)}
-                               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                             />
-                           </div>
-                           <div className="flex-1">
-                             <input
-                               type="text"
-                               placeholder="Message"
-                               value={code.message}
-                               onChange={(e) => updateStatusCode(index, 'message', e.target.value)}
-                               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                             />
-                           </div>
-                           <div className="flex-1">
-                             <select
-                               value={code.badge || 'other'}
-                               onChange={(e) => updateStatusCode(index, 'badge', e.target.value)}
-                               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                             >
-                               <option value="success">Success</option>
-                               <option value="failure">Failure</option>
-                               <option value="other">Other</option>
-                             </select>
-                           </div>
-                           <div className="flex items-center space-x-2">
-                             <input
-                               type="color"
-                               value={code.color || '#6B7280'}
-                               onChange={(e) => updateStatusCode(index, 'color', e.target.value)}
-                               className="w-10 h-10 border border-gray-300 dark:border-gray-600 rounded cursor-pointer"
-                               title="Choose color"
-                             />
-                             <button
-                               type="button"
-                               onClick={() => removeStatusCode(index)}
-                               className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300"
-                             >
-                               <Trash2 className="h-4 w-4" />
-                             </button>
-                           </div>
-                         </div>
-                       ))}
-                     </div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Copy from Device (Optional)
+                    </label>
+                    {getSourceDeviceOptions().length === 0 ? (
+                      <div className="text-sm text-gray-500 dark:text-gray-400 p-3 border border-gray-200 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700">
+                        No devices with status management found. You can add status codes manually below.
+                      </div>
+                    ) : (
+                      <>
+                        <Select
+                          value={baseDevice}
+                          onChange={(selectedOption) => {
+                            setBaseDevice(selectedOption);
+                            if (selectedOption) {
+                              // Auto-populate status codes from the selected device
+                              const sourceEntry = statusEntries.find(entry => entry.deviceId === selectedOption.value);
+                              if (sourceEntry && sourceEntry.statusCodes) {
+                                setStatusCodes(sourceEntry.statusCodes.map(code => ({
+                                  code: code.code,
+                                  message: code.message,
+                                  color: code.color || '#6B7280',
+                                  badge: code.badge || 'other'
+                                })));
+                              }
+                            } else {
+                              setStatusCodes([]);
+                            }
+                          }}
+                          options={getSourceDeviceOptions().filter(device =>
+                            !selectedDevice || device.value !== selectedDevice.value
+                          )}
+                          placeholder="Select a device to copy status codes from..."
+                          className="react-select-container"
+                          classNamePrefix="react-select"
+                          isClearable
+                        />
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          Select a device to copy its status codes. You can modify them after copying.
+                        </p>
+                      </>
+                    )}
                   </div>
                 )}
+
+                {/* Status Codes */}
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Status Codes
+                    </label>
+                    <button
+                      type="button"
+                      onClick={addStatusCode}
+                      className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add Code
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {statusCodes.map((code, index) => (
+                      <div key={index} className="flex space-x-3 p-3 border border-gray-200 dark:border-gray-600 rounded-md">
+                        <div className="flex-1">
+                          <input
+                            type="number"
+                            placeholder="Code"
+                            value={code.code}
+                            onChange={(e) => updateStatusCode(index, 'code', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <input
+                            type="text"
+                            placeholder="Message"
+                            value={code.message}
+                            onChange={(e) => updateStatusCode(index, 'message', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <select
+                            value={code.badge || 'other'}
+                            onChange={(e) => updateStatusCode(index, 'badge', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                          >
+                            <option value="success">Success</option>
+                            <option value="failure">Failure</option>
+                            <option value="other">Other</option>
+                          </select>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="color"
+                            value={code.color || '#6B7280'}
+                            onChange={(e) => updateStatusCode(index, 'color', e.target.value)}
+                            className="w-10 h-10 border border-gray-300 dark:border-gray-600 rounded cursor-pointer"
+                            title="Choose color"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeStatusCode(index)}
+                            className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
                 {/* Form Actions */}
                 <div className="flex justify-end space-x-3 pt-4">
@@ -816,26 +808,26 @@ const StatusManagement = () => {
                   />
                 </div>
 
-                                 {/* Source Device */}
-                 <div>
-                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                     Source Device
-                   </label>
-                   {getSourceDeviceOptions().length === 0 ? (
-                     <div className="text-sm text-gray-500 dark:text-gray-400 p-3 border border-gray-200 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700">
-                       No devices with status management found. Please create status management for at least one device first.
-                     </div>
-                   ) : (
-                     <Select
-                       value={sourceDevice}
-                       onChange={setSourceDevice}
-                       options={getSourceDeviceOptions()}
-                       placeholder="Select source device..."
-                       className="react-select-container"
-                       classNamePrefix="react-select"
-                     />
-                   )}
-                 </div>
+                {/* Source Device */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Source Device
+                  </label>
+                  {getSourceDeviceOptions().length === 0 ? (
+                    <div className="text-sm text-gray-500 dark:text-gray-400 p-3 border border-gray-200 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700">
+                      No devices with status management found. Please create status management for at least one device first.
+                    </div>
+                  ) : (
+                    <Select
+                      value={sourceDevice}
+                      onChange={setSourceDevice}
+                      options={getSourceDeviceOptions()}
+                      placeholder="Select source device..."
+                      className="react-select-container"
+                      classNamePrefix="react-select"
+                    />
+                  )}
+                </div>
 
                 {/* Actions */}
                 <div className="flex justify-end space-x-3 pt-4">
