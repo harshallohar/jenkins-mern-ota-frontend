@@ -4,10 +4,16 @@ services:
   frontend:
     build:
       context: .
+    container_name: my-frontend-v2
     ports:
       - "80:80"
       - "443:443"
-    container_name: my-frontend-v2
-    restart: always
     volumes:
       - /etc/letsencrypt:/etc/letsencrypt:ro
+    restart: always
+    networks:
+      - ota-network
+
+networks:
+  ota-network:
+    external: true
